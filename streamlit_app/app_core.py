@@ -125,7 +125,7 @@ class QualitativeAnalysisApp:
         """
         Run the annotation workflow for analyzing existing datasets.
         """
-        st.markdown("## 📊 Annotation Mode", unsafe_allow_html=True)
+        st.markdown("## Annotation Mode", unsafe_allow_html=True)
         st.markdown(
             """
             **Annotation Mode** allows you to analyze existing datasets using LLMs and compare results with human annotations.
@@ -162,7 +162,7 @@ class QualitativeAnalysisApp:
         """
         Run the generation workflow for creating and annotating new content.
         """
-        st.markdown("## 🚀 Generation Mode", unsafe_allow_html=True)
+        st.markdown("## Generation Mode", unsafe_allow_html=True)
         st.markdown(
             """
             **Generation Mode** allows you to generate new content using LLMs based on blueprint examples, then annotate the generated content.

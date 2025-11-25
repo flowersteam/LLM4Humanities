@@ -238,7 +238,7 @@ def compare_with_external_judgments(app_instance: Any) -> None:
                         # Multiple annotators - show mean scores with standard deviations if multiple runs
                         st.subheader("Mean Agreement Scores")
 
-                        mean_llm_human = result_row.get("mean_llm_human_agreement", 0)
+                        mean_llm_human = result_row.get("mean_kappa_llm_human", 0)
                         mean_human_human = result_row.get(
                             "mean_human_human_agreement", 0
                         )
