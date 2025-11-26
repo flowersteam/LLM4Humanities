@@ -667,7 +667,7 @@ class GeminiLLMClient(LLMClient):
 
         Error Handling
         --------------
-        - Automatically retries up to 5 times on transient errors, such as
+        - Automatically retries up to 7 times on transient errors, such as
           overload, quota issues, or temporary unavailability.
         - Uses exponential backoff between retries (0.5s, 1s, 2s, 4s, ...).
         - Re-raises the exception immediately if the error is not considered transient,
@@ -708,9 +708,9 @@ class GeminiLLMClient(LLMClient):
             response_json_schema["required"].append(key)
 
 
-        # Prompting with error handling: try at least 5 times with a delay in between
+        # Prompting with error handling: try at least 7 times with a delay in between
         base_delay=0.5
-        max_retries=5
+        max_retries=7
         for attempt in range(1, max_retries+2):
             try:
                 response = client.models.generate_content(
