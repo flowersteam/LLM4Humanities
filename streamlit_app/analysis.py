@@ -985,27 +985,44 @@ def run_analysis(
                     st.subheader("Analysis Results")
                     st.dataframe(results_df.head())
 
-                # Optional: Provide a download button for results
+                # Provide a download button for results
+                format_choice = st.radio(
+                    "Choose the output format:",
+                    ("Excel (.xlsx)", "CSV (.csv)"),
+                    index=0,
+                )
+
                 filename_input = st.text_input(
                     "**Enter a filename for your results:**",
-                    value="analysis_results.xlsx",
+                    value="analysis_results",
                     key="results_filename_input",
                 )
-                if not filename_input.endswith(".xlsx"):
-                    filename_input += ".xlsx"
 
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                    results_df.to_excel(writer, index=False, sheet_name="Results")
-                data_xlsx = output.getvalue()
+                if format_choice == "Excel (.xlsx)":
+                    if not filename_input.endswith(".xlsx"):
+                        filename_input += ".xlsx"
+
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                        results_df.to_excel(writer, index=False, sheet_name="Results")
+                    data_file = output.getvalue()
+                    mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+                else:  # CSV
+                    if not filename_input.endswith(".csv"):
+                        filename_input += ".csv"
+
+                    data_file = results_df.to_csv(index=False).encode("utf-8")
+                    mime_type = "text/csv"
 
                 st.download_button(
                     label="💾 **Download Results as Excel**",
-                    data=data_xlsx,
+                    data=data_file,
                     file_name=filename_input,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    mime=mime_type,
                     key="download_results_button",
                 )
+
 
                 return results_df
 
