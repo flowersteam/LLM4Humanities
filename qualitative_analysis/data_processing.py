@@ -213,6 +213,7 @@ def clean_and_normalize(series: pd.Series) -> pd.Series:
         .apply(
             lambda x: (
                 unicodedata.normalize("NFKD", x)
+                .replace("⁄", "/") # otherwise problems with fractions
                 .encode("ascii", "ignore")
                 .decode("ascii")
                 if pd.notnull(x)
