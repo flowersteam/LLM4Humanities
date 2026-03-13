@@ -51,6 +51,18 @@ def convert_labels(labels: List[Any], label_type: str = "auto") -> List[Any]:
     elif label_type == "str":
         # Convert all labels to strings
         return [str(label) if not pd.isna(label) else label for label in labels]
+    elif label_type == "float":
+        # Convert all labels to floats
+        converted = []
+        for label in labels:
+            if pd.isna(label):
+                converted.append(label)
+                continue
+            try:
+                converted.append(float(label))
+            except (TypeError, ValueError):
+                converted.append(np.nan)
+        return converted
     elif label_type == "auto":
         # Try to infer the best type
         try:
@@ -477,6 +489,8 @@ def run_alt_test_on_results(
     alpha: float = 0.05,
     verbose: bool = True,
     show_runs: bool = False,
+    metric: str = "accuracy",
+    label_type: str = "int",
 ) -> pd.DataFrame:
     """
     Run ALT test on detailed results DataFrame.
@@ -630,15 +644,29 @@ def run_alt_test_on_results(
 
         # Run ALT test for train data
         try:
-            # Ensure all columns have the correct type (int)
+            # Ensure all columns have the correct type for the chosen mapping
             train_data_copy = train_data.copy()
-            train_data_copy["ModelPrediction"] = pd.to_numeric(
-                train_data_copy["ModelPrediction"], errors="coerce"
-            ).astype("Int64")
-            for col in annotation_columns:
-                train_data_copy[col] = pd.to_numeric(
-                    train_data_copy[col], errors="coerce"
-                ).astype("Int64")
+            if label_type in {"int", "float"}:
+                train_data_copy["ModelPrediction"] = pd.to_numeric(
+                    train_data_copy["ModelPrediction"], errors="coerce"
+                )
+                for col in annotation_columns:
+                    train_data_copy[col] = pd.to_numeric(
+                        train_data_copy[col], errors="coerce"
+                    )
+
+                if label_type == "int":
+                    train_data_copy["ModelPrediction"] = train_data_copy[
+                        "ModelPrediction"
+                    ].astype("Int64")
+                    for col in annotation_columns:
+                        train_data_copy[col] = train_data_copy[col].astype("Int64")
+            else:
+                train_data_copy["ModelPrediction"] = train_data_copy[
+                    "ModelPrediction"
+                ].astype("string")
+                for col in annotation_columns:
+                    train_data_copy[col] = train_data_copy[col].astype("string")
 
             # Run the ALT test
             alt_test_res_train = run_alt_test_general(
@@ -647,8 +675,9 @@ def run_alt_test_on_results(
                 model_col="ModelPrediction",
                 epsilon=epsilon,
                 alpha=alpha,
+                metric=metric,
                 verbose=verbose,
-                label_type="int",
+                label_type=label_type,
             )
 
             # Add ALT test metrics to run_metrics
@@ -677,15 +706,29 @@ def run_alt_test_on_results(
         # Run ALT test for validation data if available
         if use_validation_set:
             try:
-                # Ensure all columns have the correct type (int)
+                # Ensure all columns have the correct type for the chosen mapping
                 val_data_copy = val_data.copy()
-                val_data_copy["ModelPrediction"] = pd.to_numeric(
-                    val_data_copy["ModelPrediction"], errors="coerce"
-                ).astype("Int64")
-                for col in annotation_columns:
-                    val_data_copy[col] = pd.to_numeric(
-                        val_data_copy[col], errors="coerce"
-                    ).astype("Int64")
+                if label_type in {"int", "float"}:
+                    val_data_copy["ModelPrediction"] = pd.to_numeric(
+                        val_data_copy["ModelPrediction"], errors="coerce"
+                    )
+                    for col in annotation_columns:
+                        val_data_copy[col] = pd.to_numeric(
+                            val_data_copy[col], errors="coerce"
+                        )
+
+                    if label_type == "int":
+                        val_data_copy["ModelPrediction"] = val_data_copy[
+                            "ModelPrediction"
+                        ].astype("Int64")
+                        for col in annotation_columns:
+                            val_data_copy[col] = val_data_copy[col].astype("Int64")
+                else:
+                    val_data_copy["ModelPrediction"] = val_data_copy[
+                        "ModelPrediction"
+                    ].astype("string")
+                    for col in annotation_columns:
+                        val_data_copy[col] = val_data_copy[col].astype("string")
 
                 # Run the ALT test
                 alt_test_res_val = run_alt_test_general(
@@ -694,8 +737,9 @@ def run_alt_test_on_results(
                     model_col="ModelPrediction",
                     epsilon=epsilon,
                     alpha=alpha,
+                    metric=metric,
                     verbose=verbose,
-                    label_type="int",
+                    label_type=label_type,
                 )
 
                 # Add ALT test metrics to run_metrics

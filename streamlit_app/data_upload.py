@@ -62,6 +62,10 @@ def upload_dataset(
                 session_state["column_renames"] = {}
                 session_state["column_descriptions"] = {}
                 session_state["annotation_columns"] = []
+                session_state["evaluation_mappings"] = []
+                session_state["evaluation_mappings_initialized"] = False
+                session_state["label_column"] = None
+                session_state["label_type"] = None
 
                 st.success("Data loaded successfully!")
                 st.write("Data Preview:", data.head())

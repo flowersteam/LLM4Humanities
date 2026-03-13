@@ -16,6 +16,7 @@ from streamlit_app.prompt_construction import (
     build_data_format_description,
     construct_prompt,
 )
+from streamlit_app.evaluation_mappings import clear_evaluation_result_cache
 
 
 def format_value_for_prompt(value: Any) -> Any:
@@ -625,6 +626,7 @@ def run_analysis(
                 app_instance.results = combined_results_df.to_dict("records")
                 st.session_state["results"] = app_instance.results
                 st.session_state["results_df"] = combined_results_df
+                clear_evaluation_result_cache(st.session_state)
 
                 st.success("Analysis of remaining data completed!")
 
@@ -871,6 +873,7 @@ def run_analysis(
                 st.session_state["analysis_completed"] = True
                 st.session_state["n_runs_used"] = n_runs
                 st.session_state["entries_processed"] = len(data_to_process)
+                clear_evaluation_result_cache(st.session_state)
 
             # ------------------------------------------------------------------
             # Display results (outside button block to persist across reruns)

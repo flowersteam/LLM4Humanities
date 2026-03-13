@@ -6,6 +6,8 @@ import streamlit as st
 import json
 from typing import Any
 
+from streamlit_app.evaluation_mappings import sanitize_evaluation_mappings
+
 
 def load_previous_session(app_instance: Any) -> None:
     """
@@ -66,11 +68,20 @@ def load_previous_session(app_instance: Any) -> None:
             label_column = session_data.get("label_column", None)
             label_type = session_data.get("label_type", None)
             text_columns = session_data.get("text_columns", [])
+            evaluation_mappings = session_data.get("evaluation_mappings")
 
             # Store in app instance
             app_instance.label_column = label_column
             app_instance.label_type = label_type
             app_instance.text_columns = text_columns
+            app_instance.evaluation_mappings = sanitize_evaluation_mappings(
+                raw_mappings=evaluation_mappings,
+                selected_fields=app_instance.selected_fields,
+                annotation_columns=app_instance.annotation_columns,
+                legacy_label_column=label_column,
+                legacy_label_type=label_type,
+                create_default_if_empty=evaluation_mappings is None,
+            )
 
             # Load generation mode data
             selected_mode = session_data.get("selected_mode", "Annotation Mode")
@@ -94,6 +105,8 @@ def load_previous_session(app_instance: Any) -> None:
             st.session_state["label_column"] = label_column
             st.session_state["label_type"] = label_type
             st.session_state["text_columns"] = text_columns
+            st.session_state["evaluation_mappings"] = app_instance.evaluation_mappings
+            st.session_state["evaluation_mappings_initialized"] = True
 
             # Update generation mode session state
             st.session_state["selected_mode"] = selected_mode
@@ -185,8 +198,17 @@ def save_session(app_instance: Any) -> None:
         "selected_fields": app_instance.selected_fields,
         "selected_model": app_instance.selected_model,
         "annotation_columns": app_instance.annotation_columns,
-        "label_column": app_instance.label_column,
-        "label_type": app_instance.label_type,
+        "label_column": (
+            app_instance.evaluation_mappings[0]["llm_field"]
+            if getattr(app_instance, "evaluation_mappings", [])
+            else app_instance.label_column
+        ),
+        "label_type": (
+            app_instance.evaluation_mappings[0]["label_type"]
+            if getattr(app_instance, "evaluation_mappings", [])
+            else app_instance.label_type
+        ),
+        "evaluation_mappings": getattr(app_instance, "evaluation_mappings", []),
         "text_columns": app_instance.text_columns,
         # Generation mode data
         "selected_mode": st.session_state.get("selected_mode", "Annotation Mode"),

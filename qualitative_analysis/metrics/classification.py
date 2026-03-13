@@ -157,6 +157,7 @@ def compute_classification_metrics_from_results(
     annotation_columns: List[str],
     labels: List[Any],
     show_runs: bool = False,
+    coerce_numeric_columns: bool = True,
 ) -> pd.DataFrame:
     """
     Compute classification metrics from detailed results DataFrame.
@@ -202,10 +203,12 @@ def compute_classification_metrics_from_results(
         # Return empty DataFrame
         return pd.DataFrame()
 
-    # Ensure numeric columns
-    detailed_results_df = ensure_numeric_columns(
-        detailed_results_df, ["ModelPrediction"] + annotation_columns
-    )
+    # Keep legacy coercion for existing notebook workflows, but allow callers that
+    # already prepared the data to preserve text or float labels.
+    if coerce_numeric_columns:
+        detailed_results_df = ensure_numeric_columns(
+            detailed_results_df, ["ModelPrediction"] + annotation_columns
+        )
 
     # Determine grouping based on show_runs parameter
     if show_runs:

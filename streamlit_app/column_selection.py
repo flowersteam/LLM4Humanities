@@ -87,35 +87,7 @@ def select_rename_describe_columns(
             )
             data = filtered_data
 
-            # If annotation columns are selected, ask for the expected data type
-            st.markdown("### **Label Type Configuration**", unsafe_allow_html=True)
-            st.markdown(
-                """
-                Select the expected data type for your labels (both human annotations and LLM predictions).
-                This helps ensure consistent data types for evaluation.
-                """
-            )
-
-            # Determine the default index for the label type
-            label_type_options = ["Integer", "Float", "Text"]
-            default_index = 0
-            if app_instance.label_type:
-                try:
-                    default_index = label_type_options.index(app_instance.label_type)
-                except ValueError:
-                    default_index = 0
-
-            # Select the expected data type for the labels
-            label_type = st.radio(
-                "Expected Label Type:",
-                options=label_type_options,
-                index=default_index,
-                key="label_type_radio",
-            )
-
-            # Store in session state and app instance
-            st.session_state["label_type"] = label_type
-            app_instance.label_type = label_type
+            st.info("Evaluation label types are configured per mapping in Step 4.")
 
         # Store final annotation columns and the toggle in session
         st.session_state["annotation_columns"] = app_instance.annotation_columns
