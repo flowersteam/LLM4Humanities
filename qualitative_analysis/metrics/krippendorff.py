@@ -103,10 +103,10 @@ def compute_krippendorff_non_inferiority(
             empty_annotators = [
                 cols[i] for i, ok in enumerate(annotator_mask) if not ok
             ]
-            if verbose:
-                print(
-                    f"⚠️ Warning: {empty_annotators} have no annotations and were excluded."
-                )
+            # if verbose:
+            #     print(
+            #         f"⚠️ Warning: {empty_annotators} have no annotations and were excluded."
+            #     )
             data = data[annotator_mask, :]
 
         # Check for minimum conditions: at least 2 valid annotators and 2 annotated items

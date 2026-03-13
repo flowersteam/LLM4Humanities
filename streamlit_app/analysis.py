@@ -5,7 +5,7 @@ Module for handling analysis functionality in the Streamlit app.
 import streamlit as st
 import pandas as pd
 import io
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from qualitative_analysis import (
     parse_llm_response,
@@ -40,23 +40,37 @@ def _process_data_with_llm(
     data_to_process: pd.DataFrame,
     debug_mode: bool = False,
     run_number: int = 1,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, bool]:
     """
-    Helper function that processes data with LLM and returns results DataFrame.
-    Used by run_analysis for both Step 6 and Step 8.
+    Process a batch of rows with the LLM and return the results.
+
+    This helper is used by `run_analysis` for both Step 6 and Step 8.
+    It iterates over `data_to_process`, builds prompts for each row,
+    calls the LLM, parses the model output into a dictionary, and
+    aggregates everything into a results DataFrame.
+
+    A simple early-stopping mechanism is applied:
+    if more than 20% of the entries cannot be parsed (e.g. truncated
+    output due to insufficient max tokens), the run is stopped early.
 
     Args:
-        app_instance: The QualitativeAnalysisApp instance
-        data_to_process: DataFrame containing the rows to process
-        debug_mode: Whether to show constructed prompts for debugging
-        run_number: The current run number (for multi-run analysis)
+        app_instance: The QualitativeAnalysisApp instance.
+        data_to_process: DataFrame containing the rows to process.
+        debug_mode: Whether to show constructed prompts for debugging.
+        run_number: The current run number (used for multi-run analysis).
 
     Returns:
-        DataFrame containing the processed results
+        A tuple (results_df, early_stop) where:
+            - results_df: DataFrame with the processed results
+              for the rows that were actually run.
+            - early_stop: True if the run was stopped early because
+              the parse failure rate exceeded 20%, False otherwise.
     """
     results = []
     progress_bar = st.progress(0)
     total = len(data_to_process)
+    parse_fail_count = 0
+    early_stop = False
 
     # Get the data format description from session state or build it
     data_format_description = st.session_state.get("data_format_description")
@@ -92,7 +106,7 @@ def _process_data_with_llm(
                 instructions="You are an assistant that evaluates data entries.",
                 selected_fields=app_instance.selected_fields,
                 output_format_example={
-                    field: "Your text here" for field in app_instance.selected_fields
+                    field: "Your rating here" for field in app_instance.selected_fields
                 },
             )
 
@@ -104,13 +118,23 @@ def _process_data_with_llm(
             response, usage = app_instance.llm_client.get_response(
                 prompt=prompt,
                 model=app_instance.selected_model,
-                max_tokens=500,
-                temperature=0,
+                app_instance=app_instance,
                 verbose=False,
             )
 
             # Parse the LLM response into a dictionary
             parsed = parse_llm_response(response, app_instance.selected_fields)
+            ## Count parse fails
+            failed_parse = (not parsed) or all(v is None for v in parsed.values())
+            if failed_parse:
+                parse_fail_count += 1
+            fail_rate = parse_fail_count / total
+            if fail_rate > 0.20:
+                st.error(
+                    f"### 🚨 Run stopped  \nMore than 20% ({parse_fail_count} out of {total} entries = {fail_rate*100:.1f}%) of the LLM responses could not be parsed.  \nThis suggests that the model ran out of tokens while generating its response.  \nTry increasing the **Maximum tokens limit** (Step 5 > Advanced settings) and run the analysis again."
+                )
+                early_stop = True
+                break
 
             # ------------------------------------------------------------------
             # Optional: partial numeric extraction from label column
@@ -208,6 +232,15 @@ def _process_data_with_llm(
         progress_bar.progress((i + 1) / total)
 
     # ------------------------------------------------------------------
+    # Report parsing issues to the user
+    # ------------------------------------------------------------------
+    if parse_fail_count > 0 and not early_stop:
+        # Informative message
+        st.warning(
+            f"{parse_fail_count} out of {total} entries ({fail_rate*100:.1f}%) could not be parsed and has been left empty. This often happens when the model output is truncated. Increasing the **Maximum tokens limit** (Step 5 > Advanced settings) might avoid this."
+        )
+
+    # ------------------------------------------------------------------
     # Build results_df from all processed rows
     # ------------------------------------------------------------------
     results_df = pd.DataFrame(results)
@@ -221,32 +254,49 @@ def _process_data_with_llm(
     if label_type and not results_df.empty:
         for ann_col in app_instance.annotation_columns:
             if ann_col in results_df.columns:
+                col = results_df[ann_col]
+                # nan_count = col.isna().sum()
+                # if nan_count > 0:
+                #     st.warning(
+                #         f"Annotation column '{ann_col}' contains {nan_count} missing values."
+                #     )
                 try:
                     if label_type == "Integer":
-                        results_df[ann_col] = results_df[ann_col].astype(int)
+                        # Convert only non-NaN values to avoid useless warnings
+                        mask = col.notna()
+                        results_df.loc[mask, ann_col] = col[mask].astype(int)
                     elif label_type == "Float":
-                        results_df[ann_col] = results_df[ann_col].astype(float)
+                        results_df[ann_col] = col.astype(float)
                     else:  # treat as string
-                        results_df[ann_col] = results_df[ann_col].astype(str)
+                        results_df[ann_col] = col.astype(str)
                 except (ValueError, TypeError):
                     st.warning(
                         f"Could not fully convert annotation column '{ann_col}' to {label_type}."
                     )
 
         if label_column and label_column in results_df.columns:
+            col = results_df[label_column]
+            nan_count = col.isna().sum()
+            if nan_count > 0:
+                st.warning(
+                    f"LLM label column '{label_column}' contains {nan_count} missing values."
+                )
+
             try:
                 if label_type == "Integer":
-                    results_df[label_column] = results_df[label_column].astype(int)
+                    # Convert only non-NaN values to avoid useless warnings
+                    mask = col.notna()
+                    results_df.loc[mask, label_column] = col[mask].astype(int)
                 elif label_type == "Float":
-                    results_df[label_column] = results_df[label_column].astype(float)
-                else:  # text
-                    results_df[label_column] = results_df[label_column].astype(str)
+                    results_df[label_column] = col.astype(float)
+                else:  # treat as string
+                    results_df[label_column] = col.astype(str)
             except (ValueError, TypeError):
                 st.warning(
                     f"Could not convert LLM label column '{label_column}' to {label_type}."
                 )
 
-    return results_df
+    return results_df, early_stop
 
 
 def _process_multiple_runs(
@@ -255,19 +305,32 @@ def _process_multiple_runs(
     n_runs: int,
     debug_mode: bool = False,
     is_remaining_data: bool = False,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, bool]:
     """
-    Process data with LLM across multiple runs for consistency analysis.
+    Process the same data across multiple runs for consistency analysis.
+
+    This function calls `_process_data_with_llm` `n_runs` times on the
+    same `data_to_process` and concatenates the results to allow
+    downstream consistency / reliability analysis of LLM outputs.
+
+    If any run triggers early stopping, the loop is interrupted and no
+    further runs are executed.
 
     Args:
-        app_instance: The QualitativeAnalysisApp instance
-        data_to_process: DataFrame containing the rows to process
-        n_runs: Number of runs to execute
-        debug_mode: Whether to show constructed prompts for debugging
-        is_remaining_data: Whether this is for remaining data (Step 8)
+        app_instance: The QualitativeAnalysisApp instance.
+        data_to_process: DataFrame containing the rows to process.
+        n_runs: Number of runs to execute on the same data.
+        debug_mode: Whether to show constructed prompts for debugging.
+        is_remaining_data: Currently unused in the implementation.
+            Reserved for potential future use to distinguish runs on
+            remaining data (Step 8) from runs on the main data (Step 6).
 
     Returns:
-        DataFrame containing results from all runs
+        A tuple (combined_results_df, early_stop) where:
+            - combined_results_df: DataFrame with results from all
+              completed runs (may be partial if early stopping occurs).
+            - early_stop: True if at least one run was stopped early
+              due to a high parse failure rate, False otherwise.
     """
     all_results = []
 
@@ -275,16 +338,17 @@ def _process_multiple_runs(
         st.info(f"Processing run {run} of {n_runs}...")
 
         # Process the data for this run
-        run_results_df = _process_data_with_llm(
+        run_results_df, early_stop = _process_data_with_llm(
             app_instance, data_to_process, debug_mode, run_number=run
         )
-
+        if early_stop:
+            break
         all_results.append(run_results_df)
 
     # Combine all runs into a single DataFrame
     combined_results_df = pd.concat(all_results, ignore_index=True)
 
-    return combined_results_df
+    return combined_results_df, early_stop
 
 
 def run_analysis(
@@ -293,20 +357,27 @@ def run_analysis(
     previous_results_df: Optional[pd.DataFrame] = None,
 ) -> Optional[pd.DataFrame]:
     """
-    Run Analysis on data (Step 6 or Step 8)
-    Uses the selected columns and LLM configuration to perform
-    classification or extraction tasks on the processed data.
+    Run the LLM-based analysis on the dataset (Step 6 or Step 8).
 
-    When analyze_remaining=False (default), this is Step 6 which processes the main data.
-    When analyze_remaining=True, this is Step 8 which processes remaining data not analyzed in Step 6.
+    When `analyze_remaining=False` (default), this runs Step 6 on the
+    main processed data. When `analyze_remaining=True`, this runs Step 8
+    on the remaining (unprocessed) data.
+
+    Internally, `_process_data_with_llm` and `_process_multiple_runs`
+    may stop early if more than 20% of the LLM responses cannot be parsed.
+    In that case, partial results are still returned.
 
     Args:
-        app_instance: The QualitativeAnalysisApp instance
-        analyze_remaining: Whether to analyze remaining data (Step 8) instead of main data (Step 6)
-        previous_results_df: Previous results DataFrame (required for Step 8)
+        app_instance: The QualitativeAnalysisApp instance.
+        analyze_remaining: Whether to analyze remaining data (Step 8)
+            instead of the main data (Step 6).
+        previous_results_df: Optional previous results DataFrame for Step 8.
+            If None, the function will try to retrieve it from the session
+            state (results from Step 6).
 
     Returns:
-        The results DataFrame or None if analysis was not run
+        The final results DataFrame (possibly partial if early stopping
+        occurred), or None if the analysis was not run.
     """
     if analyze_remaining:
         st.markdown(
@@ -565,8 +636,7 @@ def run_analysis(
                     response, usage = app_instance.llm_client.get_response(
                         prompt=prompt,
                         model=app_instance.selected_model,
-                        max_tokens=500,
-                        temperature=0,
+                        app_instance=app_instance,
                     )
                     cost_for_one = openai_api_calculate_cost(
                         usage, app_instance.selected_model
@@ -612,7 +682,7 @@ def run_analysis(
                 selected_run_number = st.session_state.get("step8_selected_run", 1)
 
                 # Process the data using the shared helper function with the selected run number
-                results_df = _process_data_with_llm(
+                results_df, early_stop = _process_data_with_llm(
                     app_instance,
                     data_to_process,
                     debug_mode,
@@ -628,7 +698,8 @@ def run_analysis(
                 st.session_state["results_df"] = combined_results_df
                 clear_evaluation_result_cache(st.session_state)
 
-                st.success("Analysis of remaining data completed!")
+                if not early_stop:
+                    st.success("Analysis of remaining data completed!")
 
                 # Display the new results
                 st.subheader("New Results")
@@ -807,8 +878,7 @@ def run_analysis(
                     response, usage = app_instance.llm_client.get_response(
                         prompt=prompt,
                         model=app_instance.selected_model,
-                        max_tokens=500,
-                        temperature=0,
+                        app_instance=app_instance,
                     )
                     cost_for_one = openai_api_calculate_cost(
                         usage, app_instance.selected_model
@@ -852,11 +922,11 @@ def run_analysis(
 
                 # Process the data using multiple runs if specified
                 if n_runs > 1:
-                    results_df = _process_multiple_runs(
+                    results_df, early_stop = _process_multiple_runs(
                         app_instance, data_to_process, n_runs, debug_mode
                     )
                 else:
-                    results_df = _process_data_with_llm(
+                    results_df, early_stop = _process_data_with_llm(
                         app_instance, data_to_process, debug_mode, run_number=1
                     )
 
@@ -864,7 +934,8 @@ def run_analysis(
                 app_instance.results = results_df.to_dict("records")
                 st.session_state["results"] = app_instance.results
 
-                st.success("Analysis completed!")
+                if not early_stop:
+                    st.success("Analysis completed!")
 
                 # ------------------------------------------------------------------
                 # Store final DataFrame in session and mark analysis as completed
@@ -916,25 +987,41 @@ def run_analysis(
                     st.subheader("Analysis Results")
                     st.dataframe(results_df.head())
 
-                # Optional: Provide a download button for results
+                # Provide a download button for results
+                format_choice = st.radio(
+                    "Choose the output format:",
+                    ("Excel (.xlsx)", "CSV (.csv)"),
+                    index=0,
+                )
+
                 filename_input = st.text_input(
                     "**Enter a filename for your results:**",
-                    value="analysis_results.xlsx",
+                    value="analysis_results",
                     key="results_filename_input",
                 )
-                if not filename_input.endswith(".xlsx"):
-                    filename_input += ".xlsx"
 
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                    results_df.to_excel(writer, index=False, sheet_name="Results")
-                data_xlsx = output.getvalue()
+                if format_choice == "Excel (.xlsx)":
+                    if not filename_input.endswith(".xlsx"):
+                        filename_input += ".xlsx"
+
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                        results_df.to_excel(writer, index=False, sheet_name="Results")
+                    data_file = output.getvalue()
+                    mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+                else:  # CSV
+                    if not filename_input.endswith(".csv"):
+                        filename_input += ".csv"
+
+                    data_file = results_df.to_csv(index=False).encode("utf-8")
+                    mime_type = "text/csv"
 
                 st.download_button(
                     label="💾 **Download Results as Excel**",
-                    data=data_xlsx,
+                    data=data_file,
                     file_name=filename_input,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    mime=mime_type,
                     key="download_results_button",
                 )
 

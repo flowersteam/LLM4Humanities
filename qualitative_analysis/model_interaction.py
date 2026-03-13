@@ -9,6 +9,7 @@ including:
     - Anthropic
     - Together AI
     - OpenRouter
+    - Google Gemini
     - vLLM (for open-source models)
 
 It abstracts API interactions to simplify sending prompts and retrieving responses across multiple providers.
@@ -17,9 +18,13 @@ Dependencies:
     - openai: For interacting with Azure OpenAI, standard OpenAI models, and OpenRouter.
     - anthropic: For interacting with Anthropic Claude models.
     - together: For interacting with Together AI models.
+    - google-genai: For interacting with Google Gemini models.
     - vllm: For running inference with open-source models locally.
+    - google.api_core.exceptions: For handling Google API errors (Gemini).
     - abc: For defining the abstract base class.
     - types: For using SimpleNamespace to standardize usage object representation.
+    - time: For retry backoff with Gemini.
+    - re: For normalizing field names for Gemini JSON schema.
 
 Classes:
     - LLMClient: Abstract base class defining the interface for LLM clients.
@@ -27,12 +32,13 @@ Classes:
     - AzureOpenAILLMClient: Client for interacting with Azure OpenAI language models.
     - AnthropicLLMClient: Client for interacting with Anthropic Claude models.
     - TogetherLLMClient: Client for interacting with Together AI language models.
+    - GeminiLLMClient: Client for interacting with Google Gemini models.
     - OpenRouterLLMClient: Client for interacting with OpenRouter language models.
     - VLLMLLMClient: Client for interacting with open-source models using vLLM.
 
 Functions:
-    - get_llm_client(provider, config): Factory function to instantiate the appropriate LLM client 
-      based on the specified provider string.
+    - get_llm_client(provider, config, model=None): Factory function to instantiate the appropriate
+      LLM client based on the specified provider string.
 """
 
 from abc import ABC, abstractmethod
@@ -41,7 +47,10 @@ from anthropic import Anthropic
 from together import Together
 from types import SimpleNamespace
 from typing import Optional, List, Dict, Any
-import google.generativeai as genai
+import time
+from google import genai
+from google.genai import types
+import re
 
 
 def is_gpt5_model(model_name: str) -> bool:
@@ -605,71 +614,162 @@ class GeminiLLMClient(LLMClient):
         """
         self.api_key = api_key
 
+    def normalize_key(self, field_name: str) -> str:
+        key = field_name.strip().lower()
+        key = re.sub(r"\W+", "_", key)  # any non-alphanumeric characters with _
+        key = key.strip("_")
+        return key
+
     def get_response(
-        self, prompt: str, model: str, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> tuple[str, SimpleNamespace]:
         """
-        Sends a prompt to the Google Gemini model and retrieves the response.
+        Send a text prompt to a specified Google Gemini model and retrieve the generated response.
 
-        Parameters:
+        Parameters
         ----------
-        - prompt (str):
-            The input text prompt to send to the language model.
-        - model (str):
-            The identifier of the Gemini model to use (e.g., "gemini-2.0-flash-001").
-        - **kwargs:
-            Additional keyword arguments for the Gemini API call, such as:
-                - temperature (float): Controls the randomness of the output (default is 0.0).
-                - max_tokens (int): The maximum number of tokens to generate (default is 500).
-                - verbose (bool): If True, prints the prompt and response for debugging (default is False).
+        prompt : str
+            The text prompt to be sent to the Gemini model.
+        model : str
+            The model identifier (e.g., "gemini-2.0-flash-001").
+        app_instance :
+            An optional object passed through `kwargs` that carries runtime
+            configuration attributes used for this call.
+            The following attributes are read if present:
+                - temperature (float, default = 0.0) :
+                    Controls the randomness of the output.
+                - max_tokens (int, default = 500) :
+                    Maximum number of tokens to generate.
+                - selected_fields (list[str]) :
+                    Names of fields to include in the JSON schema for the response.
+                - field_types (dict[str, str]) :
+                    Mapping from field name to JSON type ("string", "number", "integer", "boolean").
+                - field_enums (dict[str, list[str]]) :
+                    Optional enum values per field.
+                - gemini_system_instruction (str or None) :
+                    Optional system-level instruction to control model behavior.
+                - gemini_thinking_credits (int) :
+                    Optional thinking budget passed to `ThinkingConfig(thinking_budget=...)`.
+        **kwargs :
+            Optional arguments:
+                - verbose (bool, default = False):
+                    If True, prints debug information (prompt and generated text).
 
-        Returns:
+        Returns
         -------
-        - tuple[str, SimpleNamespace]:
+        tuple[str, SimpleNamespace]
             A tuple containing:
-                - The model's generated response (str).
-                - A usage object with estimated token counts (SimpleNamespace).
+                - The generated response text (str).
+                - A SimpleNamespace object with token usage:
+                    - prompt_tokens
+                    - completion_tokens (output + thoughts tokens)
+                    - total_tokens
 
-        Raises:
-        ------
-        - Exception:
-            If the API request fails.
+        Error Handling
+        --------------
+        - Automatically retries up to 7 times on transient errors, such as
+          overload, quota issues, or temporary unavailability.
+        - Uses exponential backoff between retries (0.5s, 1s, 2s, 4s, ...).
+        - Re-raises the exception immediately if the error is not considered transient,
+          or after the final retry attempt fails.
         """
-        temperature = kwargs.get("temperature", 0.0)
-        max_tokens = kwargs.get("max_tokens", 500)
+        client = genai.Client()
         verbose = kwargs.get("verbose", False)
+        app_instance = kwargs.get("app_instance")
 
-        if verbose:
-            print(f"Prompt:\n{prompt}\n")
+        temperature = getattr(app_instance, "temperature", 0.0)
+        max_tokens = getattr(app_instance, "max_tokens", 500)
 
-        # Configure API key for this request to avoid global state conflicts
-        genai.configure(api_key=self.api_key)
+        selected_fields = getattr(app_instance, "selected_fields", [])
+        field_types = getattr(app_instance, "field_types", {})
+        field_enums = getattr(app_instance, "field_enums", {})
 
-        # Create a GenerativeModel instance
-        gemini_model = genai.GenerativeModel(model)
+        system_instruction = getattr(app_instance, "gemini_system_instruction", None)
+        thinking_credits = getattr(app_instance, "gemini_thinking_credits", -1)
 
-        # Generate content
-        response = gemini_model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            ),
-        )
+        # Json schema design
+        response_json_schema: Dict[str, Any] = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        for field in selected_fields:
+            field_type = field_types.get(field, "string")
+            enum_values = field_enums.get(field, []) or None
+            key = self.normalize_key(field)
 
-        # Extract the content from the response
-        content_text = response.text.strip()
+            prop: Dict[str, Any] = {}
+            prop["type"] = field_type
+            prop["nullable"] = True
+
+            if enum_values:
+                prop["enum"] = enum_values
+
+            response_json_schema["properties"][key] = prop
+            response_json_schema["required"].append(key)
+
+        # Prompting with error handling: try at least 7 times with a delay in between
+        base_delay = 0.5
+        max_retries = 7
+        for attempt in range(1, max_retries + 2):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=thinking_credits
+                        ),
+                        temperature=temperature,
+                        max_output_tokens=max_tokens,
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_json_schema=response_json_schema,
+                    ),
+                )
+
+                # Tokens counting
+                output_token_count = response.usage_metadata.candidates_token_count or 0
+                thoughts_token_count = response.usage_metadata.thoughts_token_count or 0
+                completion_tokens = output_token_count + thoughts_token_count or 0
+                usage_obj = SimpleNamespace(
+                    prompt_tokens=response.usage_metadata.prompt_token_count,
+                    completion_tokens=completion_tokens,
+                    total_tokens=response.usage_metadata.total_token_count,
+                )
+
+                break
+
+            except Exception as e:
+                msg = str(e).lower()
+                print(e)
+
+                # Retry only on specific transient errors inferred from the message
+                transient = (
+                    "overloaded" in msg
+                    or "resource exhausted" in msg
+                    or "quota" in msg
+                    or "429" in msg
+                    or "unavailable" in msg
+                    or "try again" in msg
+                )
+
+                # Non-transient error or last attempt: re-raise the exception
+                if not transient or attempt == max_retries:
+                    raise e
+
+                # Exponential backoff between retries
+                delay = base_delay * (2 ** (attempt - 1))
+                print(
+                    f"[Gemini] Transient error (attempt {attempt}/{max_retries}): {e}"
+                )
+                print(f"[Gemini] Retrying in {delay:.2f}s...")
+                time.sleep(delay)
+
+        content_text = response.text or ""
 
         if verbose:
             print(f"Generation:\n{content_text}\n")
-
-        # Create a simple usage object (Gemini API doesn't provide token counts directly)
-        # This is a rough estimate for compatibility with other clients
-        usage_obj = SimpleNamespace(
-            prompt_tokens=len(prompt.split()),
-            completion_tokens=len(content_text.split()),
-            total_tokens=len(prompt.split()) + len(content_text.split()),
-        )
 
         return content_text, usage_obj
 
@@ -744,7 +844,7 @@ class OpenRouterLLMClient(LLMClient):
             If the API request fails (e.g., invalid model name, insufficient credits).
         """
         temperature = kwargs.get("temperature", 0.0)
-        max_tokens = kwargs.get("max_tokens", 500)
+        max_tokens = kwargs.get("max_tokens", 5000)
         verbose = kwargs.get("verbose", False)
 
         if verbose:

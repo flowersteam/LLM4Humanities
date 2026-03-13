@@ -1,9 +1,9 @@
 """
 parsing.py
 
-This module provides functions for parsing and extracting structured information from language model responses
-and classification results. It is designed to handle text outputs, JSON format, and extract 
-key data for further analysis.
+This module provides functions for parsing and extracting structured information from
+language model responses and classification results. It is designed to handle text
+outputs, JSON-like fragments, and extract key data for further analysis.
 
 Dependencies:
     - json: For parsing JSON-formatted text.
@@ -11,16 +11,16 @@ Dependencies:
     - pandas: For handling and processing tabular data.
 
 Functions:
-    - parse_llm_response(evaluation_text, selected_fields): 
-        Extracts specific fields from a JSON object within a language model response.
+    - parse_llm_response(evaluation_text, selected_fields):
+        Tries to extract specific fields from a JSON(-like) object embedded in
+        a language model response.
 
-    - extract_code_from_response(response_text, prefix=None): 
+    - extract_code_from_response(response_text, prefix=None):
         Extracts an integer code from a language model response, with optional prefix matching.
 
-    - extract_global_validity(results_df, id_pattern=r"Id:\s*(\w+)", label_column="Label", 
-                              verbatim_column="Verbatim", global_validity_column="Global_Validity", 
-                              verbatim_output_column="Verbatim"): 
-        Aggregates binary classification results to determine the overall validity of grouped entries.
+    - extract_global_validity(results_df, id_column="Id", label_column="Label",
+                              global_validity_column="Global_Validity"):
+        Aggregates binary classification results by ID to determine an overall validity flag.
 
     - parse_key_value_lines(text: str) -> Dict[str, str]:
         Parses 'Key: Value' formatted lines from a text into a dictionary, supporting multi-line values.
@@ -36,36 +36,49 @@ def parse_llm_response(
     evaluation_text: str, selected_fields: Optional[list] = None
 ) -> dict:
     """
-    Parses a language model's response to extract specified fields from a JSON object.
+    Parses a language model's response and tries to extract specified fields
+    from an embedded JSON object.
 
-    This function searches for a JSON-formatted substring within the provided `evaluation_text`.
-    If a JSON object is found, it parses the JSON and extracts the values corresponding to
-    the `selected_fields`. If no JSON object is found or parsing fails, it returns a dictionary
-    with `None` values for each selected field.
+    This function searches for a JSON-formatted substring within the provided
+    `evaluation_text`, including variants wrapped in Markdown fences such as
+    ```json ... ```. If a JSON object is found, it is cleaned (e.g. removal of
+    simple comments and some trailing commas) and parsed with `json.loads`.
 
-    This function is useful for handling responses from applications like Streamlit,
-    where the language model is instructed to return responses in JSON format.
+    - If `selected_fields` is provided and non-empty, the result is restricted
+      to those keys.
+    - If `selected_fields` is None or empty, the full parsed JSON object is
+      returned.
 
-    Parameters:
+    If no JSON object can be extracted or parsing fails, the function prints a
+    diagnostic message and returns:
+      - `{}` if `selected_fields` is None or empty;
+      - a dict mapping each field in `selected_fields` to `None` otherwise.
+
+    This function is useful when the language model is instructed to return its
+    answer in JSON format but may occasionally produce malformed or truncated
+    output.
+
+    Parameters
     ----------
     evaluation_text : str
         The full text response from the language model.
 
-    selected_fields : list
+    selected_fields : Optional[list], optional
         A list of field names (strings) to extract from the JSON object.
+        If None or empty, all parsed fields are returned on success, and
+        an empty dict is returned on failure.
 
-    Returns:
+    Returns
     -------
     dict
-        A dictionary where each key is a field from `selected_fields` and each value
-        is the corresponding value from the JSON object or `None` if not found or parsing failed.
+        - On successful parsing:
+            * Either the full JSON object (if `selected_fields` is None/empty),
+            * Or a dictionary containing only the requested fields.
+        - On failure:
+            * `{}` if `selected_fields` is None or empty,
+            * Or `{field: None, ...}` for each requested field.
 
-    Raises:
-    ------
-    ValueError
-        If no JSON object is found in the `evaluation_text`.
-
-    Examples:
+    Examples
     --------
     >>> evaluation_text = '''
     ... Here is the evaluation of your entry:
@@ -83,22 +96,21 @@ def parse_llm_response(
     ... Response without a valid JSON.
     ... '''
     >>> parse_llm_response(incomplete_text, selected_fields)
-    Error parsing LLM response: No JSON object found in the LLM response.
     {'Evaluation': None, 'Comments': None}
     """
+    json_str = None
     try:
         # Step 1: Find JSON block (including markdown variants)
         json_match = re.search(
             r"(?:```(?:json)?\n)?({.*?})(?:\n```)?", evaluation_text, re.DOTALL
         )
-
-        if not json_match:
-            raise ValueError("No JSON found in response")
+        if json_match is None:
+            raise ValueError("No JSON object found in the model response.")
 
         # Step 2: Clean JSON string
         json_str = json_match.group(1)
 
-        # Remove comments and trailing commas
+        ## Remove comments and trailing commas
         json_str = re.sub(
             r"/\*.*?\*/|//.*?$|#.*?$|,\s*}(?=\s*$)",
             "",
@@ -124,7 +136,12 @@ def parse_llm_response(
 
     except Exception as e:
         print(f"Parsing Error: {str(e)}")
-        print(f"Cleaned JSON Attempt: {json_str}")
+        if json_str is not None:
+            print(f"Cleaned JSON Attempt: {json_str}")
+        else:
+            print(
+                ">> No JSON string could be extracted from the response. Increase max_tokens?"
+            )
         if not selected_fields:
             return {}  # Return empty dict if no selected_fields
         else:

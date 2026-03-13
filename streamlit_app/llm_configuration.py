@@ -1,5 +1,21 @@
 """
 Module for handling LLM configuration functionality in the Streamlit app.
+
+This module handles:
+- Selecting an LLM provider (OpenAI, Anthropic, Gemini, Together, OpenRouter, Azure).
+- Entering or loading the provider’s API key.
+- Choosing a model depending on the provider.
+- Configuring advanced parameters such as temperature and max tokens.
+- Setting Gemini-specific options (system instruction and thinking credits).
+
+The function `configure_llm(...)` updates `app_instance` with:
+    - app_instance.llm_client
+    - app_instance.selected_model
+    - app_instance.temperature
+    - app_instance.max_tokens
+    - (Gemini only) system instruction + thinking credits
+
+Returns the instantiated LLM client, or None if configuration is incomplete.
 """
 
 import streamlit as st
@@ -181,13 +197,79 @@ def configure_llm(
                 model_options,
                 key=model_key,
             )
+
         elif selected_provider_display == "Gemini":
-            model_options = ["gemini-2.0-flash-001", "gemini-2.5-pro-preview-03-25"]
+            model_options = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
             chosen_model = st.selectbox(
                 "Select Model:",
                 model_options,
                 key=model_key,
             )
+            # System instruction
+            system_instruction = st.text_area(
+                "System instruction (optional)",
+                value="You are a strict and precise annotator who avoids any unnecessary leniency.",
+                key=f"gemini_system_instruction_step{step_number}",
+                help="High-level instructions: behavior you want Gemini to follow."
+            )
+            if not system_instruction.strip():
+                system_instruction = None
+
+            # Thinking credits
+            options = ["Manual", "Let the model decide dynamically"] if chosen_model == "gemini-2.5-pro" else ["Turn off", "Manual", "Let the model decide dynamically"]
+            mode = st.radio(
+                "Thinking credits definition",
+                options,
+                key=f"thinking_mode_{step_number}"
+            )
+
+            if chosen_model == "gemini-2.5-pro":
+                min_credits = 128
+                max_credits = 32768
+            elif chosen_model == "gemini-2.5-flash-lite":
+                min_credits = 512
+                max_credits = 24576
+            else:  # gemini-2.5-flash ou autres
+                min_credits = 1
+                max_credits = 24576
+
+            if mode == "Let the model decide dynamically":
+                thinking_input = st.number_input(
+                    "Thinking credits (dynamic mode enabled)",
+                    value=-1,
+                    disabled=True,
+                    key=f"thinking_dynamic_{step_number}",
+                )
+                thinking_credits = -1
+
+            elif mode == "Turn off":
+                thinking_input = st.number_input(
+                    "Thinking credits (thinking disabled)",
+                    value=0,
+                    disabled=True,
+                    key=f"thinking_off_{step_number}",
+                )
+                thinking_credits = 0
+
+            else:  # Manual
+                thinking_input = st.number_input(
+                    "Thinking credits",
+                    min_value=min_credits,
+                    max_value=max_credits,
+                    step=128,
+                    value=min_credits,
+                    key=f"thinking_manual_{step_number}",
+                    help=(
+                        "Controls how much internal reasoning the model is allowed to perform "
+                        "before answering; higher values enable deeper reasoning but cost more tokens.  \n"
+                        "⚠️ Thinking cannot be turned off for gemini-2.5-pro."
+                    ),
+                )
+                thinking_credits = thinking_input
+
+            app_instance.gemini_system_instruction = system_instruction
+            app_instance.gemini_thinking_credits = thinking_credits
+
         elif selected_provider_display == "Together":
             model_options = ["gpt-neoxt-chat-20B"]
             chosen_model = st.selectbox(
@@ -203,7 +285,17 @@ def configure_llm(
                 key=model_key,
             )
 
-        app_instance.selected_model = chosen_model
-        st.session_state["selected_model"] = chosen_model
+    # Advanced Settings: temperature and max tokens
+    with st.expander("Advanced settings"):
+        temperature = st.number_input(f"Temperature", min_value=0.0, max_value=2.0, step=0.1, value=0.0,
+                                      help="Controls how deterministic the model is: low temperature (< 0.3) gives stable, predictable outputs, while high temperature (> 0.7) produces more creative and varied responses.  \n**For annotation tasks, low temperature is recommended.**"
+        )
+        max_tokens = st.number_input("Maximum tokens limit", min_value=20, step=40, value=500,
+                                     help = "Sets the **maximum number of tokens the model can use for one response**. This includes both internal thinking tokens (when used) and the final visible output. If the limit is too low, the model may stop early, shorten its answer, or produce errors.  \nFor **gemini-2.5-pro**, a max_token value of about **2,500** is recommended to ensure enough space for both internal thinking and output."
+        )
+
+    app_instance.selected_model = chosen_model
+    app_instance.temperature = temperature
+    app_instance.max_tokens = max_tokens
 
     return app_instance.llm_client

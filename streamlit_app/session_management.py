@@ -55,6 +55,8 @@ def load_previous_session(app_instance: Any) -> None:
 
         # Restore session values
         app_instance.selected_columns = session_data.get("selected_columns", [])
+        app_instance.field_types = session_data.get("field_types", {})
+        app_instance.field_enums = session_data.get("field_enums", {})
 
         # Get column_renames and ensure it only includes selected columns
         loaded_column_renames = session_data.get("column_renames", {})
@@ -116,6 +118,8 @@ def load_previous_session(app_instance: Any) -> None:
         st.session_state["codebook"] = app_instance.codebook
         st.session_state["examples"] = app_instance.examples
         st.session_state["selected_fields"] = app_instance.selected_fields
+        st.session_state["field_types"] = app_instance.field_types
+        st.session_state["field_enums"] = app_instance.field_enums
         st.session_state["selected_model"] = app_instance.selected_model
         st.session_state["annotation_columns"] = app_instance.annotation_columns
         st.session_state["label_column"] = label_column
@@ -213,6 +217,8 @@ def save_session(app_instance: Any) -> None:
         "codebook": app_instance.codebook,
         "examples": app_instance.examples,
         "selected_fields": app_instance.selected_fields,
+        "field_types": getattr(app_instance, "field_types", {}),
+        "field_enums": getattr(app_instance, "field_enums", {}),
         "selected_model": app_instance.selected_model,
         "annotation_columns": app_instance.annotation_columns,
         "label_column": (

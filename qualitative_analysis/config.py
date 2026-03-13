@@ -2,8 +2,9 @@
 config.py
 
 This module manages configuration settings and pricing information for different
-OpenAI models and service providers. It securely loads environment variables and
-defines pricing data for API usage cost estimation.
+LLM providers (OpenAI, Azure OpenAI, Anthropic, Gemini, OpenRouter, vLLM).
+It securely loads environment variables and defines pricing data used for
+API usage cost estimation in the app.
 """
 
 import os
@@ -78,58 +79,94 @@ MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
 
 
 # Pricing information for different models.
-# The prices are in dollars per token, where 'prompt' is the cost of input tokens
-# and 'completion' is the cost of output tokens.
+# The prices are in dollars per token, where:
+#   - 'prompt'     = cost per input token
+#   - 'completion' = cost per output token
+# Values are approximate / illustrative and are mainly used for relative
+# cost estimation inside the app.
 MODEL_PRICES: Dict[str, Dict[str, float]] = {
-    # OpenAI models
-    "gpt-4o": {"prompt": 0.0025, "completion": 0.01},
-    "gpt-4o-mini": {
-        "prompt": 0.00015,
-        "completion": 0.0006,
+    # OpenAI models - https://openai.com/api/pricing/
+    # "gpt-4o": {"prompt": 0.0025, "completion": 0.01},
+    # "gpt-4o-mini": {
+    #     "prompt": 0.00015,
+    #     "completion": 0.0006,
+    # },
+    "gpt-5.1": {
+        "prompt": 1.25,   # $1.25 per million input tokens
+        "completion": 10  # $10.00 per million output tokens
     },
-    "gpt-5": {
-        "prompt": 0.00125,
-        "completion": 0.01,
-    },  # $1.250/1M input, $10.000/1M output
     "gpt-5-mini": {
-        "prompt": 0.00025,
-        "completion": 0.002,
-    },  # $0.250/1M input, $2.000/1M output
+        "prompt": 0.25,   # $0.25 per million input tokens
+        "completion": 2   # $2.00 per million output tokens
+    },
     "gpt-5-nano": {
-        "prompt": 0.00005,
-        "completion": 0.0004,
-    },  # $0.050/1M input, $0.400/1M output
-    # Anthropic models
-    "claude-3-7-sonnet-20250219": {
-        "prompt": 0.0030,
-        "completion": 0.0150,
+        "prompt": 0.05,   # $0.05 per million input tokens
+        "completion": 0.4 # $0.40 per million output tokens
     },
+    "gpt-5-pro": {
+        "prompt": 15,     # $15.00 per million input tokens
+        "completion": 120 # $120.00 per million output tokens
+    },
+    # Anthropic models - https://platform.claude.com/docs/en/about-claude/pricing
+    # "claude-3-7-sonnet-20250219": {     /!\DEPRECATED
+    #     "prompt": 0.0030,
+    #     "completion": 0.0150,
+    # },
     "claude-3-5-haiku-20241022": {
-        "prompt": 0.0008,
-        "completion": 0.0040,
+        "prompt": 0.8,      # $0.80 per million input tokens
+        "completion": 4,    # $4 per million output tokens
     },
-    # Gemini models (example pricing - check Google AI Studio for current prices)
-    "gemini-2.0-flash-001": {
-        "prompt": 0.00005,  # Example: $0.50 per million input tokens
-        "completion": 0.0001,  # Example: $1.00 per million output tokens
+    # Gemini models (example pricing - Check on: https://ai.google.dev/gemini-api/docs/pricing?hl=fr)
+    "gemini-2.5-flash-lite": {
+        "prompt": 0.1,      # $0.10 per million input tokens
+        "completion": 0.4   # $0.40 per million output tokens
     },
-    "gemini-2.5-pro-preview-03-25": {
-        "prompt": 0.00005,  # Example: $0.50 per million input tokens
-        "completion": 0.0001,  # Example: $1.00 per million output tokens
+    "gemini-2.5-flash": {
+        "prompt": 0.3,      # $0.30 per million input tokens
+        "completion": 2.5   # $2.50 per million output tokens
+    },
+    "gemini-2.5-pro": {
+        "prompt": 1.25,     # $1.25 per million input tokens
+        "completion": 10    # $10.00 per million output tokens
+    },
+    "gemini-3-pro-preview": {
+        "prompt": 2,        # $2.00 per million input tokens
+        "completion": 12    # $12.00 per million output tokens
     },
     # Common OpenRouter models (pricing may vary - check https://openrouter.ai/models for current rates)
     # Note: For models not listed here, cost estimation will show a generic message
-    "openai/gpt-4o": {"prompt": 0.0025, "completion": 0.01},
-    "openai/gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
-    "anthropic/claude-3.5-sonnet": {"prompt": 0.003, "completion": 0.015},
+    "openai/gpt-4o": {
+        "prompt": 2.5,   # $2.50/M input tokens
+        "completion": 10 # $10/M output tokens
+    },
+    "openai/gpt-4o-mini": {
+        "prompt": 0.15,  # $0.15/M input tokens
+        "completion": 0.6 # $0.6/M output tokens
+    },
+    "anthropic/claude-3.5-sonnet": {
+        "prompt": 0.8,   # $0.8/M input tokens
+        "completion": 4  # $4/M output tokens
+    },
     "anthropic/claude-3.7-sonnet": {
-        "prompt": 0.003,
-        "completion": 0.015,
-    },  # Added for your model
-    "anthropic/claude-3-haiku": {"prompt": 0.00025, "completion": 0.00125},
-    "meta-llama/llama-3.1-8b-instruct": {"prompt": 0.00018, "completion": 0.00018},
-    "meta-llama/llama-3.1-70b-instruct": {"prompt": 0.00088, "completion": 0.00088},
-    "google/gemini-2.0-flash-001": {"prompt": 0.000075, "completion": 0.0003},
+        "prompt": 3,     # $3/M input tokens
+        "completion": 15 # $15/M output tokens
+    },
+    "anthropic/claude-3-haiku": {
+        "prompt": 0.25,  # $0.25/M input tokens
+        "completion": 1.25 # $1.25/M output tokens
+    },
+    "meta-llama/llama-3.1-8b-instruct": {
+        "prompt": 0.02,  # $0.02/M input tokens
+        "completion": 0.03 # $0.03/M output tokens
+    },
+    "meta-llama/llama-3.1-70b-instruct": {
+        "prompt": 0.4,    # $0.40/M input tokens
+        "completion": 0.4 # $0.40/M output tokens
+    },
+    # "google/gemini-2.0-flash-001": {   RESOURCE UNAVAILABLE
+    #     "prompt": 0.000075,
+    #     "completion": 0.0003
+    # },
 }
 
 # NOTE:
