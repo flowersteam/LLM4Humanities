@@ -120,13 +120,17 @@ def sanitize_evaluation_mappings(
             )
         )
 
-        human_columns = [
-            column
-            for column in raw_mapping.get("human_columns", [])
-            if column in annotation_columns
-        ]
-        if not human_columns:
+        raw_human_columns = (
+            raw_mapping.get("human_columns") if "human_columns" in raw_mapping else None
+        )
+        if raw_human_columns is None:
             human_columns = list(annotation_columns)
+        else:
+            human_columns = [
+                column
+                for column in raw_human_columns
+                if isinstance(column, str) and column in annotation_columns
+            ]
 
         label_type = str(raw_mapping.get("label_type", legacy_label_type or "Text"))
         if label_type not in LABEL_TYPE_OPTIONS:
