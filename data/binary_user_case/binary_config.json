@@ -14,20 +14,26 @@
         "r\u00e9ponse_llm": "La r\u00e9ponse fournie par le LLM, \u00e0 juger",
         "iteration": "Identifiant"
     },
-    "codebook": "T\u00e2che d\u2019\u00e9valuation :\n\u00c9valuer si la r\u00e9ponse_llm r\u00e9pond ad\u00e9quatement, c'est \u00e0 dire qu'elle correspond \u00e0 la r\u00e9ponse attendue, en utilisant l\u2019\u00e9chelle suivante :\n\n0 : La r\u00e9ponse g\u00e9n\u00e9r\u00e9e ne permet pas du tout de r\u00e9pondre \u00e0 la question pos\u00e9e (hors sujet, incompl\u00e8te ou incorrecte).\n1 : La r\u00e9ponse g\u00e9n\u00e9r\u00e9e permet difficilement de r\u00e9pondre \u00e0 la question, car elle est vague, trop ou pas assez d\u00e9taill\u00e9e.\n2 : La r\u00e9ponse g\u00e9n\u00e9r\u00e9e permet de r\u00e9pondre clairement \u00e0 la question.",
+    "codebook": "\u00c9valuer si la r\u00e9ponse_llm r\u00e9pond ad\u00e9quatement, c'est \u00e0 dire qu'elle correspond \u00e0 la r\u00e9ponse attendue, en utilisant l\u2019\u00e9chelle suivante :\n\n0 : La r\u00e9ponse g\u00e9n\u00e9r\u00e9e ne permet pas de r\u00e9pondre \u00e0 la question pos\u00e9e (hors sujet, incompl\u00e8te, trop vague ou incorrecte).\n1 : La r\u00e9ponse g\u00e9n\u00e9r\u00e9e permet de r\u00e9pondre clairement \u00e0 la question.\n\nDonner le raisonnement (pourquoi cette classification s'applique) et le label de classification (0 ou 1).",
     "examples": "",
     "selected_fields": [
-        "Reasoning",
+        "Raisonnement",
         "Classification"
     ],
     "selected_model": "gpt-4o",
     "annotation_columns": [
-        "Rater_Oli"
+        "Rater_Oli",
+        "Rater_chloe",
+        "Rater_RA"
     ],
     "label_column": "Classification",
     "label_type": "Integer",
     "text_columns": [
         "r\u00e9ponse_attendue",
         "r\u00e9ponse_llm"
-    ]
+    ],
+    "selected_mode": "Annotation Mode",
+    "blueprints": [],
+    "generation_config": null,
+    "annotation_config": null
 }
