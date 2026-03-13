@@ -2,10 +2,16 @@
 Module for handling row annotation functionality in the Manual Annotation Tool.
 """
 
-import streamlit as st
+from typing import Dict, List, Optional, Tuple
+
 import pandas as pd
-from typing import List, Dict, Tuple, Optional
+import streamlit as st
 from transformers import pipeline
+
+from manual_annotator.rating_scales import RatingScale, is_row_fully_annotated
+
+
+EMPTY_SELECTION = "__not_rated__"
 
 
 @st.cache_resource(show_spinner=False)
@@ -19,197 +25,143 @@ def get_translator():
     return pipeline("translation_fr_to_en", model="Helsinki-NLP/opus-mt-fr-en")
 
 
-def is_valid_annotated_row(
-    df: pd.DataFrame, idx: int, annotation_cols: List[str]
-) -> bool:
-    """
-    Check if a row has non-null values in all of the selected annotation columns.
+def _format_display_value(value: object) -> str:
+    if pd.isna(value):
+        return "Not rated"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
-    Args:
-        df: The DataFrame to check
-        idx: The index of the row to check
-        annotation_cols: List of column names that contain annotations
 
-    Returns:
-        True if the row has non-null values in all of the selected annotation columns, False otherwise
-    """
-    if not annotation_cols:
-        return True
+def _rating_widget_key(column_name: str) -> str:
+    return f"rating_widget_{column_name}"
 
-    for col in annotation_cols:
-        if pd.isna(df.at[idx, col]):
-            return False
 
-    return True
+def _load_row_ratings_into_state(
+    df: pd.DataFrame, idx: int, rating_scales: List[RatingScale]
+) -> None:
+    if st.session_state.get("loaded_rating_row") == idx:
+        return
+
+    selected_scale_labels: Dict[str, str] = {}
+    for scale in rating_scales:
+        raw_value = df.at[idx, scale["column_name"]]
+        widget_value = (
+            EMPTY_SELECTION if pd.isna(raw_value) else _format_display_value(raw_value)
+        )
+        st.session_state[_rating_widget_key(scale["column_name"])] = widget_value
+        selected_scale_labels[scale["column_name"]] = (
+            "" if widget_value == EMPTY_SELECTION else widget_value
+        )
+
+    st.session_state.selected_scale_labels = selected_scale_labels
+    st.session_state.loaded_rating_row = idx
+
+
+def _persist_row_ratings(
+    df: pd.DataFrame, idx: int, rating_scales: List[RatingScale]
+) -> Dict[str, str]:
+    selected_scale_labels: Dict[str, str] = {}
+
+    for scale in rating_scales:
+        widget_key = _rating_widget_key(scale["column_name"])
+        selected_value = st.session_state.get(widget_key, EMPTY_SELECTION)
+
+        if selected_value == EMPTY_SELECTION:
+            df.at[idx, scale["column_name"]] = pd.NA
+            selected_scale_labels[scale["column_name"]] = ""
+        else:
+            df.at[idx, scale["column_name"]] = selected_value
+            selected_scale_labels[scale["column_name"]] = str(selected_value)
+
+    st.session_state.selected_scale_labels = selected_scale_labels
+    return selected_scale_labels
+
+
+def _count_remaining_unannotated(
+    df: pd.DataFrame, indices: List[int], rating_scales: List[RatingScale]
+) -> int:
+    return sum(not is_row_fully_annotated(df, idx, rating_scales) for idx in indices)
 
 
 def annotate_rows(
     df: pd.DataFrame,
     current_index: int,
     selected_columns: List[str],
-    new_col_name: str,
+    rating_scales: List[RatingScale],
     annotator_name: str,
-    fast_labels_text: str,
-    fast_label: str,
+    selected_scale_labels: Dict[str, str],
     translated_rows: Dict[int, Dict[str, str]],
     sort_column: Optional[str] = None,
     enable_sorting: bool = False,
-) -> Tuple[pd.DataFrame, int, str, Dict[int, Dict[str, str]]]:
+) -> Tuple[pd.DataFrame, int, Dict[str, str], Dict[int, Dict[str, str]]]:
     """
-    Step 7: Annotate Row-by-Row
-    Allows the user to annotate each row one by one.
-
-    Args:
-        df: The DataFrame to annotate
-        current_index: The current row index
-        selected_columns: List of columns to display
-        new_col_name: The column name for annotations
-        annotator_name: The annotator name
-        fast_labels_text: Comma-separated labels
-        fast_label: Currently selected label
-        translated_rows: Dictionary of translated rows
-        sort_column: Optional column name to sort by
-        enable_sorting: Whether sorting is enabled
-
-    Returns:
-        A tuple containing:
-        - df: The updated DataFrame
-        - current_index: The updated row index
-        - fast_label: The updated selected label
-        - translated_rows: The updated dictionary of translated rows
+    Step 7: Annotate rows one by one.
     """
     st.header("Step 7: Annotate Rows")
 
-    # Initialize fast_label in session state if not present
-    if "fast_label" not in st.session_state:
-        st.session_state.fast_label = fast_label
+    if not rating_scales:
+        st.info("Define and apply at least one rating scale to continue.")
+        st.stop()
 
-    # Apply sorting if enabled
+    if "selected_scale_labels" not in st.session_state:
+        st.session_state.selected_scale_labels = selected_scale_labels
+
+    filtered_indices = list(st.session_state.get("annotated_indices", []))
+    navigation_indices = filtered_indices if filtered_indices else df.index.tolist()
+
     if enable_sorting and sort_column and sort_column in df.columns:
-        # Create a sorted copy of the dataframe
-        sorted_df = df.sort_values(by=sort_column)
-        # Get the sorted indices
-        sorted_indices = sorted_df.index.tolist()
-        # Store the sorted indices in session state
-        st.session_state.sorted_indices = sorted_indices
+        navigation_indices = (
+            df.loc[navigation_indices].sort_values(by=sort_column).index.tolist()
+        )
+        st.session_state.sorted_indices = navigation_indices
     else:
-        # Clear sorted indices if sorting is disabled
-        if "sorted_indices" in st.session_state:
-            del st.session_state.sorted_indices
+        st.session_state.pop("sorted_indices", None)
 
-    # Get annotated indices if available (these are the filtered rows from Step 2)
-    annotated_indices = st.session_state.get("annotated_indices", [])
+    if not navigation_indices:
+        st.warning("No rows are available with the current filters.")
+        st.stop()
 
-    # Get selected annotation columns
-    selected_annotation_cols = st.session_state.get("selected_annotation_cols", [])
-
-    # Store original filtered indices before potentially overriding with sorted indices
-    filtered_indices = list(annotated_indices) if annotated_indices else []
-
-    # If sorting is enabled and we have sorted indices, use them for navigation
-    if enable_sorting and sort_column and "sorted_indices" in st.session_state:
-        # Always use sorted indices when sorting is enabled, regardless of filtering
-        annotated_indices = st.session_state.sorted_indices
-
-    # If we have indices to use for navigation (either filtered or sorted)
-    if annotated_indices:
-        # Convert current_index to actual dataframe index if we're using annotated indices
-        if current_index >= len(annotated_indices):
-            current_index = len(annotated_indices) - 1
-
-        if current_index < 0:
-            current_index = 0
-
-        # Get the actual dataframe index
-        if annotated_indices:
-            idx = annotated_indices[current_index]
-        else:
-            idx = 0
-
-        # Verify that the row has non-null values in all selected annotation columns
-        # Only check this if we're using filtered indices
-        if selected_annotation_cols and not is_valid_annotated_row(
-            df, idx, selected_annotation_cols
-        ):
-            # This shouldn't happen if the annotated_indices are correct, but just in case
-            st.warning(
-                f"Row {idx} does not have values in all selected annotation columns. "
-                f"This may indicate an issue with the filtering."
-            )
-
-        # Show appropriate message based on whether we're using sorted or filtered indices
-        if enable_sorting and sort_column and not selected_annotation_cols:
-            st.info(
-                f"Showing sorted row {current_index + 1} of {len(annotated_indices)} (sorted by {sort_column})"
-            )
-        else:
-            # Use filtered_indices.length for the total count if available
-            total_count = (
-                len(filtered_indices) if filtered_indices else len(annotated_indices)
-            )
-            st.info(f"Showing annotated row {current_index + 1} of {total_count}")
-    else:
-        # No filtering, use regular indices
-        idx = current_index
-        # Ensure index is in valid range
-        if idx < 0:
-            current_index = 0
-            idx = 0
-        if idx >= len(df):
-            current_index = len(df) - 1
-            idx = len(df) - 1
-
-    # Update session state
+    current_index = max(0, min(current_index, len(navigation_indices) - 1))
+    idx = navigation_indices[current_index]
     st.session_state.current_index = current_index
 
-    # Get flag column name
-    flag_col = f"Invalid_{annotator_name}"
+    _load_row_ratings_into_state(df, idx, rating_scales)
 
-    # Show existing rating & flagged status
-    rating_val = df.at[idx, new_col_name]
-    if (
-        pd.notna(rating_val)
-        and isinstance(rating_val, float)
-        and rating_val.is_integer()
-    ):
-        rating_val = int(rating_val)
-    flagged_val = df.at[idx, flag_col] if flag_col in df.columns else None
-
-    # Count remaining unannotated rows in the filtered subset
-    remaining_unannotated = 0
-    total_in_subset = 0
-
-    # Use filtered_indices for counting, not annotated_indices which might be overridden by sorting
+    status_parts: List[str] = []
     if filtered_indices:
-        # Get the total number of rows in the filtered subset
-        total_in_subset = len(filtered_indices)
+        status_parts.append("filtered subset")
+    if enable_sorting and sort_column:
+        status_parts.append(f"sorted by {sort_column}")
 
-        # Count how many rows in the filtered subset have been annotated
-        annotated_count = 0
-        for index in filtered_indices:
-            if pd.notna(df.at[index, new_col_name]):
-                annotated_count += 1
-
-        # Calculate remaining unannotated rows
-        remaining_unannotated = total_in_subset - annotated_count
+    if status_parts:
+        st.info(
+            f"Showing row {current_index + 1} of {len(navigation_indices)} ({', '.join(status_parts)})"
+        )
     else:
-        # If no filtering, count all unannotated rows
-        remaining_unannotated = df[pd.isna(df[new_col_name])].shape[0]
+        st.info(f"Showing row {current_index + 1} of {len(navigation_indices)}")
+
+    flag_col = f"Invalid_{annotator_name}"
+    flagged_val = bool(df.at[idx, flag_col]) if flag_col in df.columns else False
+    remaining_unannotated = _count_remaining_unannotated(
+        df, navigation_indices, rating_scales
+    )
 
     st.markdown(f"**Row Index:** {idx}")
-    st.markdown(f"**Your current label:** {rating_val}")
     st.markdown(f"**Is Invalid:** {flagged_val}")
-    st.markdown(f"**Remaining unannotated data:** {remaining_unannotated}")
+    st.markdown(f"**Remaining incomplete rows:** {remaining_unannotated}")
 
-    # Display the selected columns
+    st.markdown("**Current ratings:**")
+    for scale in rating_scales:
+        current_value = _format_display_value(df.at[idx, scale["column_name"]])
+        st.write(f"`{scale['name']}`: {current_value}")
+
     for col in selected_columns:
         val = df.at[idx, col]
-        if pd.notna(val):
-            if isinstance(val, float) and val.is_integer():
-                val = int(val)
+        if pd.notna(val) and isinstance(val, float) and val.is_integer():
+            val = int(val)
         st.write(f"**{col}:** {val}")
 
-    # Translation (optional)
     translate_row = st.checkbox("Translate this row to English", key="translate_row")
     if translate_row:
         if idx not in translated_rows:
@@ -231,137 +183,63 @@ def annotate_rows(
         for col, tval in translations.items():
             st.write(f"**{col}:** {tval}")
 
-    # Navigation Buttons
+    st.subheader("Ratings")
+    for scale in rating_scales:
+        selected_value = st.radio(
+            f"{scale['name']} ({', '.join(scale['labels'])})",
+            options=[EMPTY_SELECTION] + scale["labels"],
+            format_func=lambda option: (
+                "Not rated" if option == EMPTY_SELECTION else option
+            ),
+            key=_rating_widget_key(scale["column_name"]),
+            horizontal=True,
+        )
+        selected_scale_labels[scale["column_name"]] = (
+            "" if selected_value == EMPTY_SELECTION else str(selected_value)
+        )
+
+    st.session_state.selected_scale_labels = selected_scale_labels
+
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
         if st.button("Previous"):
-            if st.session_state.fast_label != "":
-                df.at[idx, new_col_name] = st.session_state.fast_label
-            st.session_state.fast_label = ""
-
-            if annotated_indices:
-                # Find the previous valid index
-                new_index = current_index - 1
-                while new_index >= 0:
-                    candidate_idx = annotated_indices[new_index]
-                    # Only check validity if we have selected annotation columns
-                    if not selected_annotation_cols or is_valid_annotated_row(
-                        df, candidate_idx, selected_annotation_cols
-                    ):
-                        current_index = new_index
-                        break
-                    new_index -= 1
-
-                # If no valid index found, stay at the current index
-                if new_index < 0:
-                    current_index = max(0, current_index)
-            else:
-                current_index = max(0, current_index - 1)
-
+            _persist_row_ratings(df, idx, rating_scales)
+            current_index = max(0, current_index - 1)
             st.session_state.current_index = current_index
             st.rerun()
 
     with c2:
         if st.button("Next"):
-            if st.session_state.fast_label != "":
-                df.at[idx, new_col_name] = st.session_state.fast_label
-            st.session_state.fast_label = ""
-
-            if annotated_indices:
-                # Find the next valid index
-                new_index = current_index + 1
-                while new_index < len(annotated_indices):
-                    candidate_idx = annotated_indices[new_index]
-                    # Only check validity if we have selected annotation columns
-                    if not selected_annotation_cols or is_valid_annotated_row(
-                        df, candidate_idx, selected_annotation_cols
-                    ):
-                        current_index = new_index
-                        break
-                    new_index += 1
-
-                # If no valid index found, stay at the current index
-                if new_index >= len(annotated_indices):
-                    current_index = min(len(annotated_indices) - 1, current_index)
-            else:
-                current_index = min(len(df) - 1, current_index + 1)
-
+            _persist_row_ratings(df, idx, rating_scales)
+            current_index = min(len(navigation_indices) - 1, current_index + 1)
             st.session_state.current_index = current_index
             st.rerun()
 
     with c3:
-        if st.button("Next unrated"):
-            if st.session_state.fast_label != "":
-                df.at[idx, new_col_name] = st.session_state.fast_label
-            st.session_state.fast_label = ""
+        if st.button("Next incomplete"):
+            _persist_row_ratings(df, idx, rating_scales)
             found = False
 
-            if annotated_indices:
-                for offset in range(current_index + 1, len(annotated_indices)):
-                    candidate_idx = annotated_indices[offset]
-                    # Check if the row is valid and unrated
-                    # Only check validity if we have selected annotation columns
-                    if (
-                        not selected_annotation_cols
-                        or is_valid_annotated_row(
-                            df, candidate_idx, selected_annotation_cols
-                        )
-                    ) and pd.isna(df.at[candidate_idx, new_col_name]):
-                        current_index = offset
-                        found = True
-                        break
-            else:
-                for i in range(current_index + 1, len(df)):
-                    if pd.isna(df.at[i, new_col_name]):
-                        current_index = i
-                        found = True
-                        break
+            for offset in range(current_index + 1, len(navigation_indices)):
+                candidate_idx = navigation_indices[offset]
+                if not is_row_fully_annotated(df, candidate_idx, rating_scales):
+                    current_index = offset
+                    found = True
+                    break
 
             if found:
                 st.session_state.current_index = current_index
                 st.rerun()
             else:
-                st.warning("No unrated rows found.")
+                st.warning("No incomplete rows found.")
 
     with c4:
         if st.button("Invalid data"):
             df.at[idx, flag_col] = True
-            if st.session_state.fast_label != "":
-                df.at[idx, new_col_name] = st.session_state.fast_label
-            st.session_state.fast_label = ""
-
-            if annotated_indices:
-                # Find the next valid index
-                new_index = current_index + 1
-                while new_index < len(annotated_indices):
-                    candidate_idx = annotated_indices[new_index]
-                    # Only check validity if we have selected annotation columns
-                    if not selected_annotation_cols or is_valid_annotated_row(
-                        df, candidate_idx, selected_annotation_cols
-                    ):
-                        current_index = new_index
-                        break
-                    new_index += 1
-
-                # If no valid index found, stay at the current index
-                if new_index >= len(annotated_indices):
-                    current_index = min(len(annotated_indices) - 1, current_index)
-            else:
-                current_index = min(len(df) - 1, current_index + 1)
-
+            _persist_row_ratings(df, idx, rating_scales)
+            current_index = min(len(navigation_indices) - 1, current_index + 1)
             st.session_state.current_index = current_index
             st.rerun()
 
-    # Fast Label (below data)
-    fast_labels = [
-        label.strip() for label in fast_labels_text.split(",") if label.strip()
-    ]
-    if fast_labels:
-        selected_fast_label = st.radio(
-            "Select a Label:", options=[""] + fast_labels, key="fast_label"
-        )
-        if selected_fast_label:
-            st.markdown(f"**Current Label:** {selected_fast_label}")
-
-    return df, current_index, fast_label, translated_rows
+    return df, current_index, selected_scale_labels, translated_rows

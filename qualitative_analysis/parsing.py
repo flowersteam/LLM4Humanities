@@ -104,6 +104,8 @@ def parse_llm_response(
         json_match = re.search(
             r"(?:```(?:json)?\n)?({.*?})(?:\n```)?", evaluation_text, re.DOTALL
         )
+        if json_match is None:
+            raise ValueError("No JSON object found in the model response.")
 
         # Step 2: Clean JSON string
         json_str = json_match.group(1)
@@ -137,7 +139,9 @@ def parse_llm_response(
         if json_str is not None:
             print(f"Cleaned JSON Attempt: {json_str}")
         else:
-            print(">> No JSON string could be extracted from the response. Increase max_tokens?")
+            print(
+                ">> No JSON string could be extracted from the response. Increase max_tokens?"
+            )
         if not selected_fields:
             return {}  # Return empty dict if no selected_fields
         else:

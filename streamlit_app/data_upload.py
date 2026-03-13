@@ -2,12 +2,25 @@
 Module for handling dataset upload functionality in the Streamlit app.
 """
 
+import hashlib
 import streamlit as st
 from typing import Optional, Any, Dict, Union
 import pandas as pd
 
 from qualitative_analysis import load_data
 from streamlit_app.session_management import load_previous_session
+
+
+def _build_upload_signature(
+    uploaded_file: Any, file_type: str, delimiter: str
+) -> tuple[str, int, str, Optional[str]]:
+    """
+    Create a stable signature so we only reset the workflow when the dataset changes.
+    """
+    file_bytes = uploaded_file.getvalue()
+    file_hash = hashlib.md5(file_bytes).hexdigest()
+    csv_delimiter = delimiter if file_type == "csv" else None
+    return (uploaded_file.name, len(file_bytes), file_hash, csv_delimiter)
 
 
 def upload_dataset(
@@ -52,27 +65,47 @@ def upload_dataset(
         if uploaded_file is not None:
             file_type = "csv" if uploaded_file.name.endswith(".csv") else "xlsx"
             delimiter = st.text_input("CSV Delimiter (if CSV)", value=";")
+            upload_signature = _build_upload_signature(
+                uploaded_file=uploaded_file,
+                file_type=file_type,
+                delimiter=delimiter,
+            )
+            previous_signature = session_state.get("uploaded_dataset_signature")
+            should_reload_data = (
+                previous_signature != upload_signature
+                or session_state.get("data") is None
+            )
 
-            try:
-                data = load_data(
-                    uploaded_file, file_type=file_type, delimiter=delimiter
-                )
-                # Reset session states relevant to data
-                session_state["selected_columns"] = []
-                session_state["column_renames"] = {}
-                session_state["column_descriptions"] = {}
-                session_state["annotation_columns"] = []
+            if should_reload_data:
+                try:
+                    data = load_data(
+                        uploaded_file, file_type=file_type, delimiter=delimiter
+                    )
+                    # Reset session states relevant to data only when a new dataset is loaded
+                    session_state["selected_columns"] = []
+                    session_state["column_renames"] = {}
+                    session_state["column_descriptions"] = {}
+                    session_state["annotation_columns"] = []
+                    session_state["evaluation_mappings"] = []
+                    session_state["evaluation_mappings_initialized"] = False
+                    session_state["label_column"] = None
+                    session_state["label_type"] = None
+                    session_state["uploaded_dataset_signature"] = upload_signature
 
-                st.success("Data loaded successfully!")
-                st.write("Data Preview:", data.head())
+                    st.success("Data loaded successfully!")
+                    st.write("Data Preview:", data.head())
 
-                # Store in session_state
-                session_state["data"] = data
-                app_instance.data = data
+                    # Store in session_state
+                    session_state["data"] = data
+                    app_instance.data = data
 
-            except Exception as e:
-                st.error(f"Error loading data: {e}")
-                st.stop()
+                except Exception as e:
+                    st.error(f"Error loading data: {e}")
+                    st.stop()
+            else:
+                app_instance.data = session_state.get("data", app_instance.data)
+                if app_instance.data is not None:
+                    st.write("Data Preview:", app_instance.data.head())
 
         # Add the load previous session functionality at the end of Step 1
         load_previous_session(app_instance)

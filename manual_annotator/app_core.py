@@ -3,18 +3,20 @@ Main module for the Manual Annotation Tool.
 This module defines the ManualAnnotatorApp class and the main entry point.
 """
 
-import streamlit as st
-import pandas as pd
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
-from manual_annotator.data_upload import upload_dataset
+import pandas as pd
+import streamlit as st
+
 from manual_annotator.annotation_filter import filter_annotations
 from manual_annotator.annotator_setup import setup_annotator
 from manual_annotator.codebook_upload import upload_codebook
-from manual_annotator.label_definition import define_labels
 from manual_annotator.column_selection import select_columns
-from manual_annotator.row_annotation import annotate_rows
 from manual_annotator.data_download import download_data
+from manual_annotator.data_upload import upload_dataset
+from manual_annotator.label_definition import define_labels
+from manual_annotator.rating_scales import RatingScale
+from manual_annotator.row_annotation import annotate_rows
 
 
 class ManualAnnotatorApp:
@@ -45,7 +47,16 @@ class ManualAnnotatorApp:
             "annotation_columns", []
         )
         self.annotator_name: str = st.session_state.get("annotator_name", "")
-        self.new_col_name: str = st.session_state.get("new_col_name", "")
+        self.confirmed_annotator_name: str = st.session_state.get(
+            "confirmed_annotator_name", ""
+        )
+        self.rating_scales_text: str = st.session_state.get(
+            "rating_scales_text",
+            st.session_state.get("fast_labels_text", ""),
+        )
+        self.rating_scales: List[RatingScale] = st.session_state.get(
+            "rating_scales", []
+        )
 
         # UI-related state
         self.current_index: int = st.session_state.get("current_index", 0)
@@ -55,11 +66,12 @@ class ManualAnnotatorApp:
         self.translated_rows: Dict[int, Dict[str, str]] = st.session_state.get(
             "translated_rows", {}
         )
+        self.selected_scale_labels: Dict[str, str] = st.session_state.get(
+            "selected_scale_labels", {}
+        )
 
-        # Codebook and labels
+        # Codebook
         self.codebook_text: str = st.session_state.get("codebook_text", "")
-        self.fast_labels_text: str = st.session_state.get("fast_labels_text", "")
-        self.fast_label: str = st.session_state.get("fast_label", "")
 
     def run(self) -> None:
         """
@@ -72,19 +84,18 @@ class ManualAnnotatorApp:
             """
             This application is designed to help you **manually annotate** a dataset.
             Your dataset should be in CSV format, and each row should correspond to a single item to be annotated.
-            You will be able to load your codebook (instructions) and define the labels you want to use.
-            The tool will guide you through each row, allowing you to annotate them one by one.
+            You can load a codebook, define one or several rating scales, and annotate each row dimension by dimension.
             **Invalid** rows can be flagged (it will create a new column for each annotator).
 
-            **Steps**  
-            1. **Upload Data** (CSV or XLSX)  
-            2. **Optionally Filter** rows based on existing annotation columns  
-            3. **Set Annotator Name** (creates a new column for your annotations)  
-            4. **Upload Codebook** (TXT) to display instructions on the sidebar (optional)  
-            5. **Define Labels**  
-            6. **Select Columns to Display**  
-            7. **Annotate Row-by-Row**  
-            8. **Download Updated Data**  
+            **Steps**
+            1. **Upload Data** (CSV or XLSX)
+            2. **Optionally Filter** rows based on existing annotation columns
+            3. **Set Annotator Name** (creates annotator-specific output columns)
+            4. **Upload Codebook** (TXT) to display instructions on the sidebar (optional)
+            5. **Define Rating Scales**
+            6. **Select Columns to Display**
+            7. **Annotate Row-by-Row on each scale**
+            8. **Download Updated Data**
             """
         )
 
@@ -107,46 +118,55 @@ class ManualAnnotatorApp:
             return
 
         # Step 3: Set Annotator Name
-        self.df, self.annotator_name, self.new_col_name = setup_annotator(
+        self.df, self.annotator_name, self.confirmed_annotator_name = setup_annotator(
             self.df,
             self.annotator_name,
-            self.new_col_name,
+            self.confirmed_annotator_name,
             self.annotated_count,
             self.unannotated_count,
             self.total_count,
         )
 
-        if not self.new_col_name:
+        if not self.confirmed_annotator_name:
             return
 
         # Step 4: Upload Codebook
         self.codebook_text = upload_codebook(self.codebook_text)
 
-        # Step 5: Define Labels
-        self.fast_labels_text = define_labels(self.fast_labels_text)
+        # Step 5: Define Rating Scales
+        self.df, self.rating_scales_text, self.rating_scales = define_labels(
+            self.df,
+            self.confirmed_annotator_name,
+            self.rating_scales_text,
+            self.rating_scales,
+        )
 
         # Step 6: Select Columns to Display
         self.selected_columns, self.sort_column, self.enable_sorting = select_columns(
-            self.df, self.new_col_name, self.annotator_name
+            self.df,
+            self.rating_scales,
+            self.confirmed_annotator_name,
         )
 
         if not self.selected_columns:
             return
 
         # Step 7: Annotate Row-by-Row
-        self.df, self.current_index, self.fast_label, self.translated_rows = (
-            annotate_rows(
-                self.df,
-                self.current_index,
-                self.selected_columns,
-                self.new_col_name,
-                self.annotator_name,
-                self.fast_labels_text,
-                self.fast_label,
-                self.translated_rows,
-                self.sort_column,
-                self.enable_sorting,
-            )
+        (
+            self.df,
+            self.current_index,
+            self.selected_scale_labels,
+            self.translated_rows,
+        ) = annotate_rows(
+            self.df,
+            self.current_index,
+            self.selected_columns,
+            self.rating_scales,
+            self.confirmed_annotator_name,
+            self.selected_scale_labels,
+            self.translated_rows,
+            self.sort_column,
+            self.enable_sorting,
         )
 
         # Step 8: Download Data
@@ -158,6 +178,5 @@ class ManualAnnotatorApp:
             self.annotated_count,
             self.unannotated_count,
             self.total_count,
-            self.new_col_name,
-            self.annotator_name,
+            self.confirmed_annotator_name,
         )

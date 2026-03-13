@@ -621,7 +621,7 @@ class GeminiLLMClient(LLMClient):
         return key
 
     def get_response(
-        self, prompt: str, model: str, app_instance, **kwargs
+        self, prompt: str, model: str, **kwargs: Any
     ) -> tuple[str, SimpleNamespace]:
         """
         Send a text prompt to a specified Google Gemini model and retrieve the generated response.
@@ -633,7 +633,8 @@ class GeminiLLMClient(LLMClient):
         model : str
             The model identifier (e.g., "gemini-2.0-flash-001").
         app_instance :
-            An object that carries runtime configuration attributes used for this call.
+            An optional object passed through `kwargs` that carries runtime
+            configuration attributes used for this call.
             The following attributes are read if present:
                 - temperature (float, default = 0.0) :
                     Controls the randomness of the output.
@@ -674,19 +675,20 @@ class GeminiLLMClient(LLMClient):
         """
         client = genai.Client()
         verbose = kwargs.get("verbose", False)
+        app_instance = kwargs.get("app_instance")
 
         temperature = getattr(app_instance, "temperature", 0.0)
         max_tokens = getattr(app_instance, "max_tokens", 500)
-        
+
         selected_fields = getattr(app_instance, "selected_fields", [])
         field_types = getattr(app_instance, "field_types", {})
         field_enums = getattr(app_instance, "field_enums", {})
-        
+
         system_instruction = getattr(app_instance, "gemini_system_instruction", None)
         thinking_credits = getattr(app_instance, "gemini_thinking_credits", -1)
 
         # Json schema design
-        response_json_schema = {
+        response_json_schema: Dict[str, Any] = {
             "type": "object",
             "properties": {},
             "required": [],
@@ -696,7 +698,7 @@ class GeminiLLMClient(LLMClient):
             enum_values = field_enums.get(field, []) or None
             key = self.normalize_key(field)
 
-            prop = {}
+            prop: Dict[str, Any] = {}
             prop["type"] = field_type
             prop["nullable"] = True
 
@@ -706,17 +708,18 @@ class GeminiLLMClient(LLMClient):
             response_json_schema["properties"][key] = prop
             response_json_schema["required"].append(key)
 
-
         # Prompting with error handling: try at least 7 times with a delay in between
-        base_delay=0.5
-        max_retries=7
-        for attempt in range(1, max_retries+2):
+        base_delay = 0.5
+        max_retries = 7
+        for attempt in range(1, max_retries + 2):
             try:
                 response = client.models.generate_content(
                     model=model,
                     contents=prompt,
                     config=types.GenerateContentConfig(
-                        thinking_config=types.ThinkingConfig(thinking_budget=thinking_credits),
+                        thinking_config=types.ThinkingConfig(
+                            thinking_budget=thinking_credits
+                        ),
                         temperature=temperature,
                         max_output_tokens=max_tokens,
                         system_instruction=system_instruction,
@@ -724,21 +727,20 @@ class GeminiLLMClient(LLMClient):
                         response_json_schema=response_json_schema,
                     ),
                 )
-                app_instance.selected_fields
 
                 # Tokens counting
                 output_token_count = response.usage_metadata.candidates_token_count or 0
-                thoughts_token_count=response.usage_metadata.thoughts_token_count or 0
-                completion_tokens=output_token_count+thoughts_token_count or 0
+                thoughts_token_count = response.usage_metadata.thoughts_token_count or 0
+                completion_tokens = output_token_count + thoughts_token_count or 0
                 usage_obj = SimpleNamespace(
                     prompt_tokens=response.usage_metadata.prompt_token_count,
                     completion_tokens=completion_tokens,
-                    total_tokens=response.usage_metadata.total_token_count
+                    total_tokens=response.usage_metadata.total_token_count,
                 )
-                
+
                 break
 
-            except Exception as e :
+            except Exception as e:
                 msg = str(e).lower()
                 print(e)
 
@@ -758,11 +760,13 @@ class GeminiLLMClient(LLMClient):
 
                 # Exponential backoff between retries
                 delay = base_delay * (2 ** (attempt - 1))
-                print(f"[Gemini] Transient error (attempt {attempt}/{max_retries}): {e}")
+                print(
+                    f"[Gemini] Transient error (attempt {attempt}/{max_retries}): {e}"
+                )
                 print(f"[Gemini] Retrying in {delay:.2f}s...")
                 time.sleep(delay)
-        
-        content_text=response.text or ""
+
+        content_text = response.text or ""
 
         if verbose:
             print(f"Generation:\n{content_text}\n")

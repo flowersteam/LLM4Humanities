@@ -301,6 +301,7 @@ def compute_kappa_metrics(
     labels: List[Any],
     kappa_weights: Optional[str] = None,
     show_runs: bool = False,
+    coerce_numeric_columns: bool = True,
 ) -> Tuple[pd.DataFrame, Dict[str, Dict[str, Any]]]:
     """
     Compute kappa metrics from detailed results DataFrame.
@@ -358,10 +359,12 @@ def compute_kappa_metrics(
         # Return empty DataFrames
         return pd.DataFrame(), {}
 
-    # Ensure numeric columns
-    detailed_results_df = ensure_numeric_columns(
-        detailed_results_df, ["ModelPrediction"] + annotation_columns
-    )
+    # Keep legacy coercion for existing notebook workflows, but allow callers that
+    # already prepared the data to preserve text or float labels.
+    if coerce_numeric_columns:
+        detailed_results_df = ensure_numeric_columns(
+            detailed_results_df, ["ModelPrediction"] + annotation_columns
+        )
 
     # Determine grouping based on show_runs parameter
     if show_runs:

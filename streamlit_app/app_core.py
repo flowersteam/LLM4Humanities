@@ -22,6 +22,7 @@ from streamlit_app.generation import (
     run_generation,
     annotate_generated_content,
 )
+from streamlit_app.evaluation_mappings import EvaluationMapping
 
 
 class QualitativeAnalysisApp:
@@ -60,9 +61,12 @@ class QualitativeAnalysisApp:
         self.selected_fields: List[str] = st.session_state.get("selected_fields", [])
         self.results: List[Dict[str, Any]] = st.session_state.get("results", [])
 
-        # Label configuration
+        # Legacy label configuration kept for backward compatibility
         self.label_type: Optional[str] = st.session_state.get("label_type", None)
         self.label_column: Optional[str] = st.session_state.get("label_column", None)
+        self.evaluation_mappings: List[EvaluationMapping] = st.session_state.get(
+            "evaluation_mappings", []
+        )
         self.text_columns: List[str] = st.session_state.get("text_columns", [])
 
         # Generation workflow attributes

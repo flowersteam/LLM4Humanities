@@ -16,7 +16,6 @@ def download_data(
     annotated_count: int,
     unannotated_count: int,
     total_count: int,
-    new_col_name: str,
     annotator_name: str,
 ) -> None:
     """
@@ -31,7 +30,6 @@ def download_data(
         annotated_count: Number of annotated rows
         unannotated_count: Number of unannotated rows
         total_count: Total number of rows
-        new_col_name: The column name for annotations
         annotator_name: The annotator name
     """
     st.header("Step 8: Download Updated Data")

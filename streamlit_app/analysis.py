@@ -16,6 +16,7 @@ from streamlit_app.prompt_construction import (
     build_data_format_description,
     construct_prompt,
 )
+from streamlit_app.evaluation_mappings import clear_evaluation_result_cache
 
 
 def format_value_for_prompt(value: Any) -> Any:
@@ -60,7 +61,7 @@ def _process_data_with_llm(
 
     Returns:
         A tuple (results_df, early_stop) where:
-            - results_df: DataFrame with the processed results 
+            - results_df: DataFrame with the processed results
               for the rows that were actually run.
             - early_stop: True if the run was stopped early because
               the parse failure rate exceeded 20%, False otherwise.
@@ -69,7 +70,7 @@ def _process_data_with_llm(
     progress_bar = st.progress(0)
     total = len(data_to_process)
     parse_fail_count = 0
-    early_stop=False
+    early_stop = False
 
     # Get the data format description from session state or build it
     data_format_description = st.session_state.get("data_format_description")
@@ -127,14 +128,13 @@ def _process_data_with_llm(
             failed_parse = (not parsed) or all(v is None for v in parsed.values())
             if failed_parse:
                 parse_fail_count += 1
-            fail_rate=parse_fail_count / total
+            fail_rate = parse_fail_count / total
             if fail_rate > 0.20:
                 st.error(
-                f"### 🚨 Run stopped  \nMore than 20% ({parse_fail_count} out of {total} entries = {fail_rate*100:.1f}%) of the LLM responses could not be parsed.  \nThis suggests that the model ran out of tokens while generating its response.  \nTry increasing the **Maximum tokens limit** (Step 5 > Advanced settings) and run the analysis again."
+                    f"### 🚨 Run stopped  \nMore than 20% ({parse_fail_count} out of {total} entries = {fail_rate*100:.1f}%) of the LLM responses could not be parsed.  \nThis suggests that the model ran out of tokens while generating its response.  \nTry increasing the **Maximum tokens limit** (Step 5 > Advanced settings) and run the analysis again."
                 )
-                early_stop=True
+                early_stop = True
                 break
-
 
             # ------------------------------------------------------------------
             # Optional: partial numeric extraction from label column
@@ -230,7 +230,7 @@ def _process_data_with_llm(
             continue
 
         progress_bar.progress((i + 1) / total)
-    
+
     # ------------------------------------------------------------------
     # Report parsing issues to the user
     # ------------------------------------------------------------------
@@ -238,7 +238,7 @@ def _process_data_with_llm(
         # Informative message
         st.warning(
             f"{parse_fail_count} out of {total} entries ({fail_rate*100:.1f}%) could not be parsed and has been left empty. This often happens when the model output is truncated. Increasing the **Maximum tokens limit** (Step 5 > Advanced settings) might avoid this."
-        )            
+        )
 
     # ------------------------------------------------------------------
     # Build results_df from all processed rows
@@ -281,7 +281,7 @@ def _process_data_with_llm(
                 st.warning(
                     f"LLM label column '{label_column}' contains {nan_count} missing values."
                 )
-            
+
             try:
                 if label_type == "Integer":
                     # Convert only non-NaN values to avoid useless warnings
@@ -636,7 +636,7 @@ def run_analysis(
                     response, usage = app_instance.llm_client.get_response(
                         prompt=prompt,
                         model=app_instance.selected_model,
-                        app_instance=app_instance
+                        app_instance=app_instance,
                     )
                     cost_for_one = openai_api_calculate_cost(
                         usage, app_instance.selected_model
@@ -696,6 +696,7 @@ def run_analysis(
                 app_instance.results = combined_results_df.to_dict("records")
                 st.session_state["results"] = app_instance.results
                 st.session_state["results_df"] = combined_results_df
+                clear_evaluation_result_cache(st.session_state)
 
                 if not early_stop:
                     st.success("Analysis of remaining data completed!")
@@ -877,7 +878,7 @@ def run_analysis(
                     response, usage = app_instance.llm_client.get_response(
                         prompt=prompt,
                         model=app_instance.selected_model,
-                        app_instance=app_instance
+                        app_instance=app_instance,
                     )
                     cost_for_one = openai_api_calculate_cost(
                         usage, app_instance.selected_model
@@ -943,6 +944,7 @@ def run_analysis(
                 st.session_state["analysis_completed"] = True
                 st.session_state["n_runs_used"] = n_runs
                 st.session_state["entries_processed"] = len(data_to_process)
+                clear_evaluation_result_cache(st.session_state)
 
             # ------------------------------------------------------------------
             # Display results (outside button block to persist across reruns)
@@ -1022,7 +1024,6 @@ def run_analysis(
                     mime=mime_type,
                     key="download_results_button",
                 )
-
 
                 return results_df
 
