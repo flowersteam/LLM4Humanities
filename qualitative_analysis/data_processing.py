@@ -213,7 +213,7 @@ def clean_and_normalize(series: pd.Series) -> pd.Series:
         .apply(
             lambda x: (
                 unicodedata.normalize("NFKD", x)
-                .replace("⁄", "/") # otherwise problems with fractions
+                .replace("⁄", "/")  # otherwise problems with fractions
                 .encode("ascii", "ignore")
                 .decode("ascii")
                 if pd.notnull(x)
@@ -255,7 +255,7 @@ def sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     return df.apply(
         lambda col: (
-            col.str.replace(r"\r", " ", regex=True) # Keep line breaks \n
+            col.str.replace(r"\r", " ", regex=True)  # Keep line breaks \n
             if col.dtype == "object"
             else col
         )

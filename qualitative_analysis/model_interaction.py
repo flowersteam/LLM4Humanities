@@ -43,14 +43,25 @@ Functions:
 
 from abc import ABC, abstractmethod
 import openai
+import httpx
 from anthropic import Anthropic
 from together import Together
 from types import SimpleNamespace
 from typing import Optional, List, Dict, Any
 import time
-from google import genai
-from google.genai import types
 import re
+
+GENAI_IMPORT_ERROR: Optional[BaseException] = None
+try:
+    from google import genai
+    from google.genai import types
+
+    GENAI_AVAILABLE = True
+except Exception as exc:
+    genai = None  # type: ignore[assignment]
+    types = None  # type: ignore[assignment]
+    GENAI_AVAILABLE = False
+    GENAI_IMPORT_ERROR = exc
 
 
 def is_gpt5_model(model_name: str) -> bool:
@@ -82,6 +93,19 @@ def is_gpt5_model(model_name: str) -> bool:
     ]
 
     return any(pattern in model_lower for pattern in gpt5_patterns)
+
+
+def _raise_client_initialization_error(provider_name: str, exc: Exception) -> "None":
+    message = str(exc)
+    if "unexpected keyword argument 'proxies'" in message:
+        raise RuntimeError(
+            f"{provider_name} client initialization failed because the installed "
+            f"`openai` and `httpx` versions are incompatible in the active environment. "
+            f"Detected versions: openai {openai.__version__}, httpx {httpx.__version__}. "
+            "This project expects the pinned compatible pair, for example "
+            "`pip install openai==1.109.1 httpx==0.28.1`."
+        ) from exc
+    raise exc
 
 
 # Try to import vLLM, but handle the case when it's not available
@@ -170,7 +194,10 @@ class OpenAILLMClient(LLMClient):
         api_key : str
             The OpenAI API key to use (from OPENAI_API_KEY).
         """
-        self.client = openai.OpenAI(api_key=api_key)
+        try:
+            self.client = openai.OpenAI(api_key=api_key)
+        except Exception as exc:
+            _raise_client_initialization_error("OpenAI", exc)
 
     def get_response(
         self, prompt: str, model: str, **kwargs
@@ -296,11 +323,14 @@ class AzureOpenAILLMClient(LLMClient):
         - api_version (str):
             The API version to use when making API requests.
         """
-        self.client = openai.AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=api_version,
-        )
+        try:
+            self.client = openai.AzureOpenAI(
+                api_key=api_key,
+                azure_endpoint=endpoint,
+                api_version=api_version,
+            )
+        except Exception as exc:
+            _raise_client_initialization_error("Azure OpenAI", exc)
 
     def get_response(
         self, prompt: str, model: str, **kwargs
@@ -612,6 +642,13 @@ class GeminiLLMClient(LLMClient):
         -------
         >>> client = GeminiLLMClient(api_key='your_api_key')
         """
+        if not GENAI_AVAILABLE:
+            raise ImportError(
+                "Google Gemini support requires the `google-genai` package. "
+                "Install or repair it in the active environment with "
+                "`pip install -U typing_extensions google-genai`. "
+                f"Original import error: {GENAI_IMPORT_ERROR}"
+            )
         self.api_key = api_key
 
     def normalize_key(self, field_name: str) -> str:
@@ -808,10 +845,13 @@ class OpenRouterLLMClient(LLMClient):
         -------
         >>> client = OpenRouterLLMClient(api_key='your_openrouter_api_key')
         """
-        self.client = openai.OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-        )
+        try:
+            self.client = openai.OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+            )
+        except Exception as exc:
+            _raise_client_initialization_error("OpenRouter", exc)
 
     def get_response(
         self, prompt: str, model: str, **kwargs
@@ -1114,6 +1154,13 @@ def get_llm_client(
     elif provider == "anthropic":
         return AnthropicLLMClient(api_key=config["api_key"])
     elif provider == "gemini":
+        if not GENAI_AVAILABLE:
+            raise ImportError(
+                "Google Gemini support requires the `google-genai` package. "
+                "Install or repair it in the active environment with "
+                "`pip install -U typing_extensions google-genai`. "
+                f"Original import error: {GENAI_IMPORT_ERROR}"
+            )
         return GeminiLLMClient(api_key=config["api_key"])
     elif provider == "together":
         return TogetherLLMClient(api_key=config["api_key"])

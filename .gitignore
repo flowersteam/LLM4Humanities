@@ -120,3 +120,4 @@ exploratory_data/
 exploratory_scripts/
 data/outputs/
 manuscript/
+.tmp_openai*/

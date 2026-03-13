@@ -72,13 +72,15 @@ def openai_api_calculate_cost(usage: UsageProtocol, model: str = "gpt-4o") -> fl
             usage.total_tokens * default_cost_per_1k_tokens / 1000, 6
         )
         # Optional: Print warning for debugging (can be removed if too verbose)
-        print(f"Warning: No pricing data for model '{model}'. Using default estimate of ${estimated_cost:.6f}")
+        print(
+            f"Warning: No pricing data for model '{model}'. Using default estimate of ${estimated_cost:.6f}"
+        )
 
         return estimated_cost
 
     # Use exact pricing for known models
     # /!\ Prices stored as dollars per million tokens ( $/M tokens )
-    prompt_cost: float = usage.prompt_tokens * pricing["prompt"]  / 1_000_000
+    prompt_cost: float = usage.prompt_tokens * pricing["prompt"] / 1_000_000
     completion_cost: float = usage.completion_tokens * pricing["completion"] / 1_000_000
     calculated_cost: float = round(prompt_cost + completion_cost, 6)
 

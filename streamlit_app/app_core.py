@@ -59,6 +59,8 @@ class QualitativeAnalysisApp:
         )
 
         self.selected_fields: List[str] = st.session_state.get("selected_fields", [])
+        self.field_types: Dict[str, Any] = st.session_state.get("field_types", {})
+        self.field_enums: Dict[str, List[Any]] = st.session_state.get("field_enums", {})
         self.results: List[Dict[str, Any]] = st.session_state.get("results", [])
 
         # Legacy label configuration kept for backward compatibility

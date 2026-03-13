@@ -51,6 +51,10 @@ def select_fields(app_instance: Any, step_number: int = 4) -> List[str]:
             """,
             unsafe_allow_html=True,
         )
+        st.caption(
+            "If you use the direct Gemini provider, field types and allowed values can be configured later "
+            f"in Step {step_number + 1} > Advanced settings."
+        )
 
         previous_fields = list(app_instance.selected_fields)
         default_fields = ",".join(previous_fields) if previous_fields else ""
@@ -63,104 +67,6 @@ def select_fields(app_instance: Any, step_number: int = 4) -> List[str]:
 
         app_instance.selected_fields = extracted
         st.session_state["selected_fields"] = extracted
-
-        # -------- Types and optional enums ---------
-        field_types_existing = getattr(
-            app_instance, "field_types", {}
-        ) or st.session_state.get("field_types", {})
-        field_enums_existing = getattr(
-            app_instance, "field_enums", {}
-        ) or st.session_state.get("field_enums", {})
-
-        field_types = {}
-        field_enums = {}
-
-        if extracted:
-            st.subheader("Field Types and Allowed Values")
-            st.markdown(
-                """
-                For each field, choose its **type**, and optionally define a **set of allowed values**
-                (e.g., *1, 2, 3, 4, 5* or *low, medium, high*).
-                """
-            )
-            type_options = ["string", "number", "boolean"]
-
-            for field in extracted:
-                with st.container(border=True):
-                    st.markdown(f"**{field}**")
-                    col1, col2 = st.columns([2, 4])
-                    # Field type selection
-                    default_type = field_types_existing.get(field, "string")
-                    with col1:
-                        selected_type = st.selectbox(
-                            "Type",
-                            options=type_options,
-                            index=(
-                                type_options.index(default_type)
-                                if default_type in type_options
-                                else 0
-                            ),
-                            help="Choose **string** for text, **number** for numbers, and **boolean** for a binary value such as True/False.",
-                            key=f"field_type_{field}",
-                        )
-                    field_types[field] = selected_type
-
-                    # Whether this field uses a list of allowed values
-                    existing_enum = field_enums_existing.get(field, None)
-                    has_enum_default = (
-                        existing_enum is not None and len(existing_enum) > 0
-                    )
-                    with col2:
-                        if selected_type == "boolean":
-                            use_enum = st.checkbox(
-                                f"Restrict '{field}' to a list of allowed values?",
-                                value=has_enum_default,
-                                disabled=True,
-                                key=f"field_use_enum_{field}",
-                            )
-                        else:
-                            use_enum = st.checkbox(
-                                f"Restrict '{field}' to a list of allowed values?",
-                                value=has_enum_default,
-                                key=f"field_use_enum_{field}",
-                            )
-
-                    if use_enum:
-                        default_enum_str = (
-                            ", ".join(str(v) for v in existing_enum)
-                            if existing_enum
-                            else ""
-                        )
-                        with col2:
-                            enum_str = st.text_input(
-                                f"Allowed values for '{field}' (comma-separated):",
-                                value=default_enum_str,
-                                key=f"field_enum_values_{field}",
-                            )
-                        raw_values = [
-                            v.strip() for v in enum_str.split(",") if v.strip()
-                        ]
-
-                        # Cast according to the field type
-                        if selected_type == "number":
-                            cast_values = []
-                            for v in raw_values:
-                                try:
-                                    cast_values.append(float(v))
-                                except ValueError:
-                                    # If casting fails, keep as string
-                                    cast_values.append(v)
-                            field_enums[field] = cast_values
-                        else:
-                            field_enums[field] = raw_values
-                    else:
-                        field_enums[field] = []
-
-            # Save in state
-            app_instance.field_types = field_types
-            app_instance.field_enums = field_enums
-            st.session_state["field_types"] = field_types
-            st.session_state["field_enums"] = field_enums
 
         # Only show label selection if fields have been specified and annotation columns exist
         if app_instance.selected_fields and app_instance.annotation_columns:

@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from qualitative_analysis import get_llm_client
 import qualitative_analysis.config as config
+from streamlit_app.field_constraints import render_field_constraints_editor
 
 
 def configure_llm(
@@ -145,9 +146,15 @@ def configure_llm(
         provider_config["api_key"] = final_api_key
 
         # Instantiate the LLM client
-        app_instance.llm_client = get_llm_client(
-            provider=internal_provider, config=provider_config
-        )
+        try:
+            app_instance.llm_client = get_llm_client(
+                provider=internal_provider, config=provider_config
+            )
+        except Exception as exc:
+            st.error(
+                f"Could not initialize the {selected_provider_display} client: {exc}"
+            )
+            return None
 
         # Select model - make keys unique based on step number
         model_key = f"llm_model_select_step{step_number}"
@@ -163,17 +170,24 @@ def configure_llm(
                 """
             )
 
+            current_selected_model = st.session_state.get("selected_model")
+            default_openrouter_model = (
+                current_selected_model
+                if isinstance(current_selected_model, str)
+                and current_selected_model.strip()
+                else "anthropic/claude-3.5-sonnet"
+            )
+
             chosen_model = st.text_input(
                 "Enter OpenRouter Model Name:",
-                value=st.session_state.get(
-                    "selected_model", "anthropic/claude-3.5-sonnet"
-                ),
+                value=default_openrouter_model,
                 placeholder="anthropic/claude-3.5-sonnet",
                 key=f"openrouter_model_input_step{step_number}",
                 help="Format: provider/model-name (e.g., anthropic/claude-3.5-sonnet)",
             )
+            chosen_model = chosen_model.strip()
 
-            if not chosen_model.strip():
+            if not chosen_model:
                 st.warning("Please enter a model name to continue.")
                 return None
 
@@ -199,7 +213,11 @@ def configure_llm(
             )
 
         elif selected_provider_display == "Gemini":
-            model_options = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+            model_options = [
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+            ]
             chosen_model = st.selectbox(
                 "Select Model:",
                 model_options,
@@ -210,17 +228,21 @@ def configure_llm(
                 "System instruction (optional)",
                 value="You are a strict and precise annotator who avoids any unnecessary leniency.",
                 key=f"gemini_system_instruction_step{step_number}",
-                help="High-level instructions: behavior you want Gemini to follow."
+                help="High-level instructions: behavior you want Gemini to follow.",
             )
             if not system_instruction.strip():
                 system_instruction = None
 
             # Thinking credits
-            options = ["Manual", "Let the model decide dynamically"] if chosen_model == "gemini-2.5-pro" else ["Turn off", "Manual", "Let the model decide dynamically"]
+            options = (
+                ["Manual", "Let the model decide dynamically"]
+                if chosen_model == "gemini-2.5-pro"
+                else ["Turn off", "Manual", "Let the model decide dynamically"]
+            )
             mode = st.radio(
                 "Thinking credits definition",
                 options,
-                key=f"thinking_mode_{step_number}"
+                key=f"thinking_mode_{step_number}",
             )
 
             if chosen_model == "gemini-2.5-pro":
@@ -287,12 +309,24 @@ def configure_llm(
 
     # Advanced Settings: temperature and max tokens
     with st.expander("Advanced settings"):
-        temperature = st.number_input(f"Temperature", min_value=0.0, max_value=2.0, step=0.1, value=0.0,
-                                      help="Controls how deterministic the model is: low temperature (< 0.3) gives stable, predictable outputs, while high temperature (> 0.7) produces more creative and varied responses.  \n**For annotation tasks, low temperature is recommended.**"
+        temperature = st.number_input(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            step=0.1,
+            value=0.0,
+            help="Controls how deterministic the model is: low temperature (< 0.3) gives stable, predictable outputs, while high temperature (> 0.7) produces more creative and varied responses.  \n**For annotation tasks, low temperature is recommended.**",
         )
-        max_tokens = st.number_input("Maximum tokens limit", min_value=20, step=40, value=500,
-                                     help = "Sets the **maximum number of tokens the model can use for one response**. This includes both internal thinking tokens (when used) and the final visible output. If the limit is too low, the model may stop early, shorten its answer, or produce errors.  \nFor **gemini-2.5-pro**, a max_token value of about **2,500** is recommended to ensure enough space for both internal thinking and output."
+        max_tokens = st.number_input(
+            "Maximum tokens limit",
+            min_value=20,
+            step=40,
+            value=500,
+            help="Sets the **maximum number of tokens the model can use for one response**. This includes both internal thinking tokens (when used) and the final visible output. If the limit is too low, the model may stop early, shorten its answer, or produce errors.  \nFor **gemini-2.5-pro**, a max_token value of about **2,500** is recommended to ensure enough space for both internal thinking and output.",
         )
+        if selected_provider_display == "Gemini":
+            st.markdown("---")
+            render_field_constraints_editor(app_instance, step_number)
 
     app_instance.selected_model = chosen_model
     app_instance.temperature = temperature
