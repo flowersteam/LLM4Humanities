@@ -282,3 +282,7 @@ Contains text files defining classification rules or codebooks for the user-case
 - **`.pre-commit-config.yaml`** – Configuration for pre-commit hooks (linting, formatting, etc.).
 - **`.gitignore`** – Specifies files to be ignored by Git.
 - **`requirements.txt`** – Lists all Python dependencies required for the project.
+
+## License
+
+This project is licensed under the MIT License.
